@@ -127,7 +127,7 @@
       }
     });
 
-    simulateFaceTracking();
+    simulateFaceTracking()
 
     // HLS.js to play .m3u8 stream in browsers
     if (Hls.isSupported()) {
