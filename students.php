@@ -10,10 +10,14 @@ include 'db.php'; // database connection
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="style.css" />
   <style>
-    body { font-family: Arial, Helvetica, sans-serif; background:#fff; margin:0; }
-    .main { padding: 18px 28px; }
-    header { background:#b30000; color:#fff; padding:12px 18px; border-radius:6px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; }
-    .g7container { background:#fff; padding:18px; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.08); }
+  body { font-family: Arial, Helvetica, sans-serif; background:#f5f5f5; margin:0; display:flex; }
+  /* match dashboard main sizing and spacing */
+  /* match camera.php layout: larger content padding and header sizing */
+  .main { flex: 1; padding: 20px; box-sizing: border-box; }
+    header { background-color: #b30000; color: #fff; padding: 10px 20px; border-radius: 8px; display:flex; justify-content:space-between; align-items:center; }
+  /* clear margin and inherit sizing from global styles so header matches other pages */
+  header h2 { margin:0; font-weight:700; }
+    .g7container { background:#fff; padding:18px; margin-top: 15px; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.08); }
     .g7header { background:#b30000; color:#fff; padding:10px 14px; border-radius:6px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; text-transform:uppercase; }
     table { width:100%; border-collapse:collapse; margin:10px 0 18px; }
     table thead th { text-align:left; padding:10px; background:#f2f2f2; }
@@ -51,8 +55,11 @@ include 'db.php'; // database connection
 
 <div class="main">
   <header>
-    <div style="font-weight:700; font-size:18px;">Wmsu Attendance Tracking</div>
-    <div class="admin-info">👤 Admin</div>
+    <h2>Wmsu Attendance Tracking</h2>
+    <div style="display:flex;align-items:center;gap:12px">
+      <div id="dateTime" style="color:#fff;font-weight:600"></div>
+      <div class="admin-info">👤 Admin</div>
+    </div>
   </header>
 
   <div class="g7container">
@@ -63,43 +70,44 @@ include 'db.php'; // database connection
 
     <div style="display:flex; justify-content:space-between; align-items:center;">
       <h3 style="margin:0;">Students Profile</h3>
-      <div id="dateTime" style="color:#666;"></div>
     </div>
 
-    <table>
-      <thead>
-        <tr>
-          <th>Photo</th><th>Name</th><th>Year</th><th>Section</th><th>Actions</th>
-        </tr>
-      </thead>
-      <tbody id="studentsTbody">
-        <?php
-        $result = $conn->query("SELECT * FROM students ORDER BY id DESC");
-        while($row = $result->fetch_assoc()){
-          $thumb = !empty($row['photo1']) ? 'uploads/'.$row['photo1'] : 'images/default-avatar.png';
-          echo "<tr data-id='{$row['id']}'
-                    data-student_id='{$row['student_id']}'
-                    data-full_name='{$row['full_name']}'
-                    data-birthdate='{$row['birthdate']}'
-                    data-gender='{$row['gender']}'
-                    data-year_level='{$row['year_level']}'
-                    data-section='{$row['section']}'
-                    data-guardian='{$row['guardian']}'
-                    data-phone_no='{$row['phone_no']}'
-                    data-photo='{$row['photo1']}'>
-            <td><img src='{$thumb}' class='thumbnail'></td>
-            <td>{$row['full_name']}</td>
-            <td>{$row['year_level']}</td>
-            <td>{$row['section']}</td>
-            <td><button class='edit-btn small-btn' type='button'>Edit</button></td>
-          </tr>";
-        }
-        ?>
-      </tbody>
-    </table>
+    <?php
+    // Build a grouped view: year_level -> sections
+    $yearsRes = $conn->query("SELECT year_level FROM students GROUP BY year_level ORDER BY year_level");
+    if ($yearsRes && $yearsRes->num_rows > 0) {
+      while ($yr = $yearsRes->fetch_assoc()) {
+        $year = htmlspecialchars($yr['year_level']);
+        // Skip Grade 12 per request
+        if ($year === '12') continue;
+        echo "<div style='background:#fff;padding:10px;border-radius:6px;margin-bottom:8px;box-shadow:0 2px 6px rgba(0,0,0,0.04)'>";
+  echo "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'>";
+  echo "<strong>Grade " . $year . "</strong>";
+  echo "</div>";
 
-    <a id="openFormBtn" class="download-btn">+ Add Student</a>
+        // sections for this year
+        $secRes = $conn->query("SELECT section, COUNT(*) as cnt FROM students WHERE year_level = '" . $conn->real_escape_string($year) . "' GROUP BY section ORDER BY section");
+        echo "<table style='width:100%;border-collapse:collapse'>";
+        echo "<thead><tr><th style='text-align:left;padding:8px;border-bottom:1px solid #eee'>Grade Year/ Level</th><th style='text-align:right;padding:8px;border-bottom:1px solid #eee'></th></tr></thead>";
+        echo "<tbody>";
+        while ($s = $secRes->fetch_assoc()) {
+          $sectionName = htmlspecialchars($s['section']);
+          echo "<tr><td style='padding:8px;border-bottom:1px solid #eee'>" . $sectionName . "</td>";
+          echo "<td style='padding:8px;border-bottom:1px solid #eee;text-align:right'><a class='small-btn' href='students_list.php?section=" . urlencode($sectionName) . "' style='text-decoration:none'>View</a></td></tr>";
+        }
+        echo "</tbody></table>";
+        echo "</div>";
+      }
+    } else {
+      echo "<div>No students found.</div>";
+    }
+    ?>
+
+    <!-- Add Section button removed -->
   </div>
+</div>
+
+<div id="students-list" style="margin:14px 20px;"> <!-- AJAX-inserted students list will appear here -->
 </div>
 
 <!-- ADD STUDENT MODAL -->
@@ -151,55 +159,18 @@ include 'db.php'; // database connection
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-  const openModal = el => el.classList.add('open');
-  const closeModal = el => el.classList.remove('open');
-
-  const addStudentModal = document.getElementById('addStudentModal');
-  const avatarPreview = document.getElementById('mainAvatarPreview');
-  const fileInput = document.getElementById('photo1Main');
-
-  // Open Add Student
-  document.getElementById('openFormBtn').addEventListener('click', e => {
-    e.preventDefault();
-    document.querySelector('#addStudentForm').reset();
-    avatarPreview.src = "images/default-avatar.png";
-    document.querySelector('.modal-title').innerText = "Add Student";
-    document.getElementById('studentIdField').value = "";
-    openModal(addStudentModal);
-  });
-
-  // Close modal
-  document.querySelectorAll('[data-close]').forEach(btn => {
-    btn.addEventListener('click', function(){
-      closeModal(this.closest('.modal'));
-    });
-  });
-
-  // Preview photo
-  fileInput.addEventListener('change', function(){
-    if(this.files[0]){
-      avatarPreview.src = URL.createObjectURL(this.files[0]);
-    }
-  });
-
-  // Edit button
-  document.querySelectorAll('.edit-btn').forEach(btn => {
-    btn.addEventListener('click', function(){
-      const tr = this.closest('tr');
-      document.querySelector('.modal-title').innerText = "Edit Student";
-      document.getElementById('studentIdField').value = tr.dataset.id;
-      document.getElementById('student_id').value = tr.dataset.student_id;
-      document.getElementById('full_name').value = tr.dataset.full_name;
-      document.getElementById('birthdate').value = tr.dataset.birthdate;
-      document.getElementById('gender').value = tr.dataset.gender;
-      document.getElementById('year_level').value = tr.dataset.year_level;
-      document.getElementById('section').value = tr.dataset.section;
-      document.getElementById('guardian').value = tr.dataset.guardian;
-      document.getElementById('phone_no').value = tr.dataset.phone_no;
-      avatarPreview.src = tr.dataset.photo ? "uploads/" + tr.dataset.photo : "images/default-avatar.png";
-      openModal(addStudentModal);
-    });
-  });
+  // realtime clock for header
+  function updateClock() {
+    const el = document.getElementById('dateTime');
+    if (!el) return;
+    const now = new Date();
+    const opts = { month: 'short', day: '2-digit', year: 'numeric' };
+    const dateStr = now.toLocaleDateString(undefined, opts);
+    const timeStr = now.toLocaleTimeString(undefined, { hour12: true });
+    el.textContent = `${dateStr} ${timeStr}`;
+  }
+  updateClock();
+  setInterval(updateClock, 1000);
 });
 </script>
 </body>
