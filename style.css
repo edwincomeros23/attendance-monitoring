@@ -79,6 +79,39 @@ header {
   padding: 10px 20px;
   border-radius: 5px;
 }
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.notif-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  color: #fff;
+  text-decoration: none;
+  background: transparent;
+  transition: background 0.12s ease;
+}
+.notif-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.notif-count {
+  position: absolute;
+  right: -4px;
+  top: -4px;
+  background: #ff4d4d;
+  color: #fff;
+  border-radius: 999px;
+  padding: 2px 6px;
+  font-size: 12px;
+  line-height: 1;
+  border: 2px solid #b30000;
+}
 .overview {
   margin-top: 20px;
 }
@@ -226,7 +259,7 @@ header {
 }
 
 /* New teachers UI styles */
-.teachers-container{width:100%;margin:18px 0;padding:0 20px}
+.teachers-container{width:100%;margin:18px 0;}
 .teachers-tools{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
 .tabs{display:flex;gap:18px}
 .tab{background:transparent;border:none;padding:8px 12px;cursor:pointer;font-weight:700;color:#444}
@@ -238,7 +271,7 @@ header {
 .export-btns .btn{border:1px solid #ccc;background:#fff;border-radius:6px;padding:6px 10px;font-size:13px}
 .faculty-wrapper{display:flex;justify-content:center}
 .faculty-card.centered{background:#fff;border-radius:6px;border:1px solid #dcdcdc;overflow:hidden;width:100%}
-.faculty-title{background:#b71c1c;color:#fff;padding:14px 20px;margin:0;font-size:16px;font-weight:700}
+.faculty-title{background:#b30000;color:#fff;padding:14px 20px;margin:0;font-size:16px;font-weight:700}
 .faculty-table{width:100%;border-collapse:collapse;table-layout:fixed}
 .faculty-table td, .faculty-table th{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .faculty-table thead th:nth-child(1){width:28%}

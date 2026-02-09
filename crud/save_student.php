@@ -14,6 +14,7 @@ $year_level = isset($_POST['year_level']) ? trim($_POST['year_level']) : '';
 $section = isset($_POST['section']) ? trim($_POST['section']) : '';
 $guardian = isset($_POST['guardian']) ? trim($_POST['guardian']) : '';
 $phone_no = isset($_POST['phone_no']) ? trim($_POST['phone_no']) : '';
+$guardian_email = isset($_POST['guardian_email']) ? trim($_POST['guardian_email']) : '';
 $birthdate = isset($_POST['birthdate']) ? trim($_POST['birthdate']) : '';
 $gender = isset($_POST['gender']) ? trim($_POST['gender']) : '';
 $avatar = '';
@@ -36,6 +37,7 @@ if ($year_level !== '') { $fields[] = 'year_level = ?'; $types .= 's'; $values[]
 if ($section !== '') { $fields[] = 'section = ?'; $types .= 's'; $values[] = $section; }
 if ($guardian !== '') { $fields[] = 'guardian = ?'; $types .= 's'; $values[] = $guardian; }
 if ($phone_no !== '') { $fields[] = 'phone_no = ?'; $types .= 's'; $values[] = $phone_no; }
+if ($guardian_email !== '') { $fields[] = 'guardian_email = ?'; $types .= 's'; $values[] = $guardian_email; }
 if ($birthdate !== '') { $fields[] = 'birthdate = ?'; $types .= 's'; $values[] = $birthdate; }
 if ($gender !== '') { $fields[] = 'gender = ?'; $types .= 's'; $values[] = $gender; }
 if ($avatar !== '') { $fields[] = 'photo1 = ?'; $types .= 's'; $values[] = $avatar; }

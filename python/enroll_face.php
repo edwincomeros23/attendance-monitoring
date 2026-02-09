@@ -62,7 +62,7 @@ if (file_put_contents($path, $imgData) === false) {
 // Build a public URL relative to site root
 $labelEnc = rawurlencode($label);
 $fileEnc = rawurlencode($fname);
-$url = '/thesis2/known_faces/' . $labelEnc . '/' . $fileEnc;
+$url = '/attendance-monitoring/known_faces/' . $labelEnc . '/' . $fileEnc;
 
 echo json_encode(['ok' => true, 'message' => 'Saved', 'url' => $url, 'filename' => $fname]);
 

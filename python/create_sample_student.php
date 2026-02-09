@@ -12,6 +12,7 @@ $year_level = '12';
 $section = 'A';
 $guardian = '';
 $phone_no = '';
+$guardian_email = '';
 $photo1 = '';
 
 // check if exists by student_id
@@ -24,12 +25,12 @@ if ($res && $res->num_rows > 0) {
     exit;
 }
 
-$ins = $conn->prepare('INSERT INTO students (student_id, full_name, birthdate, gender, year_level, section, guardian, phone_no, photo1) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+$ins = $conn->prepare('INSERT INTO students (student_id, full_name, birthdate, gender, year_level, section, guardian, phone_no, guardian_email, photo1) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
 if (!$ins) {
     echo json_encode(['ok' => false, 'message' => 'DB prepare failed']);
     exit;
 }
-$ins->bind_param('sssssssss', $student_id, $full_name, $birthdate, $gender, $year_level, $section, $guardian, $phone_no, $photo1);
+$ins->bind_param('ssssssssss', $student_id, $full_name, $birthdate, $gender, $year_level, $section, $guardian, $phone_no, $guardian_email, $photo1);
 $ok = $ins->execute();
 if ($ok) {
     echo json_encode(['ok' => true, 'message' => 'Sample student created', 'student_id' => $student_id]);

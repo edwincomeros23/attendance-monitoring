@@ -1,8 +1,38 @@
+<?php
+// Attempt to start session only when possible.
+// Some pages include this file after HTML has been sent; calling session_start()
+// in that case raises a headers-sent warning. Guard against that.
+if (session_status() == PHP_SESSION_NONE) {
+  if (!headers_sent()) {
+    session_start();
+  }
+}
+$sy = isset($_SESSION['school_year']) && !empty($_SESSION['school_year']) ? htmlspecialchars($_SESSION['school_year']) : '2025–2026';
+$userRole = isset($_SESSION['role']) ? $_SESSION['role'] : 'teacher';
+$isAdmin = ($userRole === 'admin');
+$notifCount = 0;
+$notifCountDisplay = '0';
+if (file_exists(__DIR__ . '/db.php')) {
+  include_once __DIR__ . '/db.php';
+  if (isset($conn)) {
+    try {
+      $res = $conn->query("SELECT COUNT(*) AS cnt FROM notification_logs");
+      if ($res && ($row = $res->fetch_assoc())) {
+        $notifCount = (int)$row['cnt'];
+        $notifCountDisplay = (string)$notifCount;
+      }
+    } catch (Exception $e) {
+      $notifCount = 0;
+      $notifCountDisplay = '0';
+    }
+  }
+}
+?>
 <div class="sidebar">
   <div class="logo-container">
-    <img src="wmsulogo.jpeg" alt="WMSU Logo" class="wmsu-logo" />
-    <p class="school-year">2025–2026</p>
-  </div> 
+    <img src="/attendance-monitoring/wmsulogo.jpeg" alt="WMSU Logo" class="wmsu-logo" />
+    <p class="school-year"><?php echo $sy; ?></p>
+  </div>
   <style>
     .sidebar {
       display: flex;
@@ -70,33 +100,50 @@
   </style>
   <ul class="menu">
     <li>
-      <a href="dashboard.php" class="<?= basename($_SERVER['PHP_SELF']) == 'dashboard.php' ? 'active' : '' ?>">
+      <a href="/attendance-monitoring/pages/dashboard.php" class="<?= basename($_SERVER['PHP_SELF']) == 'dashboard.php' ? 'active' : '' ?>">
         <i class="fas fa-house"></i><span>Dashboard</span>
       </a>
     </li>
     <li>
-      <a href="camera.php" class="<?= basename($_SERVER['PHP_SELF']) == 'camera.php' ? 'active' : '' ?>">
+      <a href="/attendance-monitoring/pages/camera.php" class="<?= basename($_SERVER['PHP_SELF']) == 'camera.php' ? 'active' : '' ?>">
         <i class="fas fa-camera"></i><span>Camera</span>
       </a>
     </li>
     <li>
-      <a href="students.php" class="<?= basename($_SERVER['PHP_SELF']) == 'students.php' ? 'active' : '' ?>">
+      <a href="/attendance-monitoring/pages/students.php" class="<?= basename($_SERVER['PHP_SELF']) == 'students.php' ? 'active' : '' ?>">
         <i class="fas fa-user-graduate"></i><span>Students</span>
       </a>
     </li>
     <li>
-      <a href="reports.php" class="<?= basename($_SERVER['PHP_SELF']) == 'reports.php' ? 'active' : '' ?>">
+      <a href="/attendance-monitoring/pages/reports.php" class="<?= basename($_SERVER['PHP_SELF']) == 'reports.php' ? 'active' : '' ?>">
         <i class="fas fa-chart-bar"></i><span>Reports</span>
       </a>
     </li>
+    <?php if ($isAdmin): ?>
     <li>
-      <a href="teachers.php" class="<?= basename($_SERVER['PHP_SELF']) == 'teachers.php' ? 'active' : '' ?>">
+      <a href="/attendance-monitoring/pages/teachers.php" class="<?= basename($_SERVER['PHP_SELF']) == 'teachers.php' ? 'active' : '' ?>">
         <i class="fas fa-chalkboard-teacher"></i><span>Teachers</span>
+      </a>
+    </li>
+    <li>
+      <a href="/attendance-monitoring/pages/curicculum.php" class="<?= basename($_SERVER['PHP_SELF']) == 'curicculum.php' ? 'active' : '' ?>">
+        <i class="fas fa-book"></i><span>Curicculum</span>
+      </a>
+    </li>
+    <li>
+      <a href="/attendance-monitoring/pages/sms_settings.php" class="<?= basename($_SERVER['PHP_SELF']) == 'sms_settings.php' ? 'active' : '' ?>">
+        <i class="fas fa-bell"></i><span>SMS & Email Notifications</span>
+      </a>
+    </li>
+    <?php endif; ?>
+    <li>
+      <a href="/attendance-monitoring/pages/attendance_report.php" class="<?= basename($_SERVER['PHP_SELF']) == 'attendance_report.php' ? 'active' : '' ?>">
+        <i class="fas fa-calendar-check"></i><span>Attendance Report</span>
       </a>
     </li>
   </ul>
     <!-- Logout Button -->
   <div class="logout">
-    <a href="logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a>
+    <a href="/attendance-monitoring/auth/logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a>
   </div>
 </div>

@@ -12,6 +12,7 @@ $year_level = isset($_POST['year_level']) ? trim($_POST['year_level']) : '';
 $section = isset($_POST['section']) ? trim($_POST['section']) : '';
 $guardian = isset($_POST['guardian']) ? trim($_POST['guardian']) : '';
 $phone_no = isset($_POST['phone_no']) ? trim($_POST['phone_no']) : '';
+$guardian_email = isset($_POST['guardian_email']) ? trim($_POST['guardian_email']) : '';
 $birthdate = isset($_POST['birthdate']) ? trim($_POST['birthdate']) : '';
 $gender = isset($_POST['gender']) ? trim($_POST['gender']) : '';
 // The schema uses student_id (numeric/text) column; accept student_id from POST if provided
@@ -24,13 +25,13 @@ if ($full_name === '') {
 }
 
 // Insert into students table. Adjust columns if your schema differs.
-$sql = "INSERT INTO students (full_name, year_level, section, guardian, phone_no, birthdate, gender, student_id, photo1) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '')";
+$sql = "INSERT INTO students (full_name, year_level, section, guardian, phone_no, guardian_email, birthdate, gender, student_id, photo1) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '')";
 $stmt = $conn->prepare($sql);
 if (!$stmt) {
     echo json_encode(['success' => false, 'message' => 'Prepare failed: ' . $conn->error]);
     exit;
 }
-$stmt->bind_param('ssssssss', $full_name, $year_level, $section, $guardian, $phone_no, $birthdate, $gender, $student_id);
+$stmt->bind_param('sssssssss', $full_name, $year_level, $section, $guardian, $phone_no, $guardian_email, $birthdate, $gender, $student_id);
 $ok = $stmt->execute();
 if (!$ok) {
     echo json_encode(['success' => false, 'message' => $stmt->error]);

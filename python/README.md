@@ -12,7 +12,7 @@ Option A — automated (recommended on Windows)
 
 ```powershell
 # open PowerShell (run as your user; Admin not required unless you need to install Python)
-cd C:\xampp\htdocs\thesis2\python
+cd C:\xampp\htdocs\attendance-monitoring\python
 # run the helper which will detect `py`/`python`, create .venv and install requirements
 .\python_setup.ps1
 ```
@@ -20,7 +20,7 @@ cd C:\xampp\htdocs\thesis2\python
 Option B — manual (works if `python`/`py` is available)
 
 ```powershell
-cd C:\xampp\htdocs\thesis2\python
+cd C:\xampp\htdocs\attendance-monitoring\python
 # create venv (use `py -3` if `python` is not on PATH)
 py -3 -m venv .venv
 # allow script execution for this session if blocked
@@ -33,7 +33,7 @@ python -m pip install -r requirements.txt
 If you prefer automation, run the helper script (it will create the venv and install packages):
 
 ```powershell
-# run from c:\xampp\htdocs\thesis2\python
+# run from c:\xampp\htdocs\attendance-monitoring\python
 .\python_setup.ps1
 ```
 

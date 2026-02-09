@@ -1,0 +1,16 @@
+# Generated/media artifacts
+stream/
+known_faces/
+
+# Dependency vendors (use composer install)
+vendor/
+
+# Python venv
+python/.venv/
+
+# Logs
+*.log
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
