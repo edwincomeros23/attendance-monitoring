@@ -32,5 +32,7 @@ RUN echo "post_max_size = 50M" >> /usr/local/etc/php/conf.d/uploads.ini
 # Expose port
 EXPOSE 80
 
-# Start Apache
-CMD ["apache2-foreground"]
+# Start Apache with dynamic PORT binding
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
+CMD ["/start.sh"]
