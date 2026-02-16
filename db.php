@@ -6,7 +6,15 @@ if (getenv('RENDER') === 'true' || !empty(getenv('DB_HOST'))) {
     $user = getenv('DB_USER');
     $pass = getenv('DB_PASSWORD');
     $dbname = getenv('DB_NAME') ?: 'attendance_monitoring';
-    $port = getenv('DB_PORT') ?: 3306;
+    $port = getenv('DB_PORT');
+    if (!$port || !is_numeric($port) || (int)$port === 0) {
+        $port = 3306;
+    } else {
+        $port = (int)$port;
+    }
+
+    // Debug: Uncomment the next line to see the port in error output (remove after testing)
+    // die('DB_PORT used: ' . $port);
 
     // Enable SSL for Aiven (if required)
     $mysqli = mysqli_init();
@@ -19,7 +27,7 @@ if (getenv('RENDER') === 'true' || !empty(getenv('DB_HOST'))) {
             $mysqli->ssl_set(null, null, null, null, null);
         }
     }
-    @$mysqli->real_connect($host, $user, $pass, $dbname, (int)$port, null, MYSQLI_CLIENT_SSL);
+    @$mysqli->real_connect($host, $user, $pass, $dbname, $port, null, MYSQLI_CLIENT_SSL);
     $conn = $mysqli;
 } else {
     // Local XAMPP environment
