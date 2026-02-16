@@ -1,26 +1,12 @@
 FROM php:8.1-apache
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
-    mysql-client \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
-    python3 \
-    python3-pip \
-    libssl-dev \
-    libcurl4-openssl-dev \
-    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 # Install PHP extensions
 RUN docker-php-ext-install mysqli pdo pdo_mysql
-
-# Install Python dependencies for face recognition
-RUN pip3 install --no-cache-dir \
-    opencv-python \
-    numpy \
-    face-recognition \
-    flask \
-    flask-cors
 
 # Enable Apache modules
 RUN a2enmod rewrite headers deflate
