@@ -6,6 +6,9 @@ $userRole = isset($_SESSION['role']) ? $_SESSION['role'] : 'teacher';
 $displayRole = ucfirst($userRole);
 $userLabel = ($displayRole === 'Admin') ? 'Admin' : $displayRole;
 $isAdmin = ($userRole === 'admin');
+$sectionsConfig = file_exists(__DIR__ . '/../config/sections.php')
+  ? include __DIR__ . '/../config/sections.php'
+  : ['7' => ['Ruby', 'Mahogany', 'Sunflower'], '8' => ['Ruby', 'Mahogany', 'Sunflower']];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -53,101 +56,37 @@ $isAdmin = ($userRole === 'admin');
       </div>
     </header>
 
-    <!-- Grade 7 Sections (UI-only, copied from camera.php) -->
-    <div style="margin-top:14px;background:#fff;padding:12px;border-radius:8px;box-shadow:0 4px 10px rgba(0,0,0,0.05)">
-      <h3 style="margin:0 0 8px 0;color:#b71c1c">Grade 7 Sections</h3>
-      <div style="overflow:auto;max-height:420px">
-        <table id="grade7Table" class="sections-table" style="width:100%;border-collapse:collapse;font-size:14px">
-          <thead style="background:#f7f7f7"><tr><th>Section</th><th>Time</th><th>Action</th><th class="action">Reports</th></tr></thead>
-          <tbody>
-            <tr>
-              <td>7-Ruby</td>
-              <td class="time-cell"></td>
-              <td>
-                <?php if ($isAdmin): ?>
-                  <button class="delete-btn" data-year="7" data-section="7-Ruby">Delete</button>
-                <?php else: ?>
-                  <span style="opacity:.6">—</span>
-                <?php endif; ?>
-              </td>
-              <td class="action"><a href="subjects.php?year=Grade+7&amp;section=Ruby" class="small-btn">View Reports</a></td>
-            </tr>
-            <tr>
-              <td>7-Mahogany</td>
-              <td class="time-cell"></td>
-              <td>
-                <?php if ($isAdmin): ?>
-                  <button class="delete-btn" data-year="7" data-section="7-Mahogany">Delete</button>
-                <?php else: ?>
-                  <span style="opacity:.6">—</span>
-                <?php endif; ?>
-              </td>
-              <td class="action"><a href="subjects.php?year=Grade+7&amp;section=Mahogany" class="small-btn">View Reports</a></td>
-            </tr>
-            <tr>
-              <td>7-Sunflower</td>
-              <td class="time-cell"></td>
-              <td>
-                <?php if ($isAdmin): ?>
-                  <button class="delete-btn" data-year="7" data-section="7-Sunflower">Delete</button>
-                <?php else: ?>
-                  <span style="opacity:.6">—</span>
-                <?php endif; ?>
-              </td>
-              <td class="action"><a href="subjects.php?year=Grade+7&amp;section=Sunflower" class="small-btn">View Reports</a></td>
-            </tr>
-          </tbody>
-        </table>
+    <?php foreach ($sectionsConfig as $grade => $sections): ?>
+      <div style="margin-top:14px;background:#fff;padding:12px;border-radius:8px;box-shadow:0 4px 10px rgba(0,0,0,0.05)">
+        <h3 style="margin:0 0 8px 0;color:#b71c1c">Grade <?php echo htmlspecialchars($grade, ENT_QUOTES, 'UTF-8'); ?> Sections</h3>
+        <div style="overflow:auto;max-height:420px">
+          <table id="grade<?php echo htmlspecialchars($grade, ENT_QUOTES, 'UTF-8'); ?>Table" class="sections-table" style="width:100%;border-collapse:collapse;font-size:14px">
+            <thead style="background:#f7f7f7"><tr><th>Section</th><th>Time</th><th>Action</th><th class="action">Reports</th></tr></thead>
+            <tbody>
+              <?php foreach ($sections as $sectionName): ?>
+                <?php
+                  $label = $grade . '-' . $sectionName;
+                  $sectionParam = $sectionName;
+                  $yearParam = 'Grade ' . $grade;
+                ?>
+                <tr>
+                  <td><?php echo htmlspecialchars($label, ENT_QUOTES, 'UTF-8'); ?></td>
+                  <td class="time-cell"></td>
+                  <td>
+                    <?php if ($isAdmin): ?>
+                      <button class="delete-btn" data-year="<?php echo htmlspecialchars($grade, ENT_QUOTES, 'UTF-8'); ?>" data-section="<?php echo htmlspecialchars($label, ENT_QUOTES, 'UTF-8'); ?>">Delete</button>
+                    <?php else: ?>
+                      <span style="opacity:.6">—</span>
+                    <?php endif; ?>
+                  </td>
+                  <td class="action"><a href="subjects.php?year=<?php echo urlencode($yearParam); ?>&amp;section=<?php echo urlencode($sectionParam); ?>" class="small-btn">View Reports</a></td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
-
-    <!-- Grade 8 Sections (UI-only, copied from camera.php) -->
-    <div style="margin-top:14px;background:#fff;padding:12px;border-radius:8px;box-shadow:0 4px 10px rgba(0,0,0,0.05)">
-      <h3 style="margin:0 0 8px 0;color:#b71c1c">Grade 8 Sections</h3>
-      <div style="overflow:auto;max-height:420px">
-        <table id="grade8Table" class="sections-table" style="width:100%;border-collapse:collapse;font-size:14px">
-          <thead style="background:#f7f7f7"><tr><th>Section</th><th>Time</th><th>Action</th><th class="action">Reports</th></tr></thead>
-          <tbody>
-            <tr>
-              <td>8-Ruby</td>
-              <td class="time-cell"></td>
-              <td>
-                <?php if ($isAdmin): ?>
-                  <button class="delete-btn" data-year="8" data-section="8-Ruby">Delete</button>
-                <?php else: ?>
-                  <span style="opacity:.6">—</span>
-                <?php endif; ?>
-              </td>
-              <td class="action"><a href="subjects.php?year=Grade+8&amp;section=Ruby" class="small-btn">View Sections</a></td>
-            </tr>
-            <tr>
-              <td>8-Mahogany</td>
-              <td class="time-cell"></td>
-              <td>
-                <?php if ($isAdmin): ?>
-                  <button class="delete-btn" data-year="8" data-section="8-Mahogany">Delete</button>
-                <?php else: ?>
-                  <span style="opacity:.6">—</span>
-                <?php endif; ?>
-              </td>
-              <td class="action"><a href="subjects.php?year=Grade+8&amp;section=Mahogany" class="small-btn">View Sections</a></td>
-            </tr>
-            <tr>
-              <td>8-Sunflower</td>
-              <td class="time-cell"></td>
-              <td>
-                <?php if ($isAdmin): ?>
-                  <button class="delete-btn" data-year="8" data-section="8-Sunflower">Delete</button>
-                <?php else: ?>
-                  <span style="opacity:.6">—</span>
-                <?php endif; ?>
-              </td>
-              <td class="action"><a href="subjects.php?year=Grade+8&amp;section=Sunflower" class="small-btn">View Sections</a></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <?php endforeach; ?>
 
     <?php if ($isAdmin): ?>
     <!-- Add Section button (right-aligned, in-flow, project red) -->
@@ -214,6 +153,19 @@ $isAdmin = ($userRole === 'admin');
     const form = document.getElementById('addSectionForm');
     if (!addBtn || !modal || !form) return;
 
+    function sortSectionTable(table) {
+      if (!table) return;
+      const tbody = table.querySelector('tbody');
+      if (!tbody) return;
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      rows.sort((a, b) => {
+        const aText = (a.querySelector('td')?.textContent || '').trim().toLowerCase();
+        const bText = (b.querySelector('td')?.textContent || '').trim().toLowerCase();
+        return aText.localeCompare(bText);
+      });
+      rows.forEach(row => tbody.appendChild(row));
+    }
+
     function showModal(show){ modal.style.display = show ? 'flex' : 'none'; }
     addBtn.addEventListener('click', ()=> showModal(true));
     cancelBtn.addEventListener('click', ()=> showModal(false));
@@ -227,8 +179,13 @@ $isAdmin = ($userRole === 'admin');
       const grade = document.getElementById('gradeLevel').value;
       if (!name) return alert('Please enter a section name');
 
+      const payload = new URLSearchParams();
+      payload.append('action', 'add');
+      payload.append('grade', grade);
+      payload.append('section', name);
+
       // Build new row and append to the proper table
-      const tableId = grade === '7' ? 'grade7Table' : 'grade8Table';
+      const tableId = `grade${grade}Table`;
       const table = document.getElementById(tableId);
       if (!table) {
         alert('Target table not found');
@@ -252,11 +209,23 @@ $isAdmin = ($userRole === 'admin');
       tr.appendChild(tdTime);
       tr.appendChild(tdDelete);
       tr.appendChild(tdAction);
-      tbody.appendChild(tr);
-
-      // clear form and close
-      form.reset();
-      showModal(false);
+      fetch('/attendance-monitoring/crud/save_sections.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: payload
+      })
+        .then(r => r.json())
+        .then((data) => {
+          if (!data || !data.ok) {
+            alert(data && data.error ? data.error : 'Failed to save section');
+            return;
+          }
+          tbody.appendChild(tr);
+          sortSectionTable(table);
+          form.reset();
+          showModal(false);
+        })
+        .catch(() => alert('Failed to save section'));
     });
   })();
 
@@ -265,9 +234,34 @@ $isAdmin = ($userRole === 'admin');
     document.addEventListener('click', function(e){
       const btn = e.target.closest('.delete-btn');
       if (!btn) return;
-      if (!confirm('Delete this section? This is UI-only and will not affect the database.')) return;
-      const tr = btn.closest('tr');
-      if (tr) tr.remove();
+      if (!confirm('Delete this section?')) return;
+      const sectionLabel = btn.getAttribute('data-section') || '';
+      const grade = btn.getAttribute('data-year') || '';
+      const sectionName = sectionLabel.includes('-') ? sectionLabel.split('-').slice(1).join('-') : sectionLabel;
+      const payload = new URLSearchParams();
+      payload.append('action', 'delete');
+      payload.append('grade', grade);
+      payload.append('section', sectionName);
+
+      fetch('/attendance-monitoring/crud/save_sections.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: payload
+      })
+        .then(r => r.json())
+        .then((data) => {
+          if (!data || !data.ok) {
+            alert(data && data.error ? data.error : 'Failed to delete section');
+            return;
+          }
+          const tr = btn.closest('tr');
+          if (tr) {
+            const table = tr.closest('table');
+            tr.remove();
+            sortSectionTable(table);
+          }
+        })
+        .catch(() => alert('Failed to delete section'));
     });
   })();
   <?php endif; ?>

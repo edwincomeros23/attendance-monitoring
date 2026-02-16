@@ -107,6 +107,31 @@ function canSendSMS($studentId, $eventType) {
 }
 
 /**
+ * Check if Telegram can be sent (throttle check)
+ */
+function canSendTelegram($studentId, $eventType) {
+    global $conn;
+
+    $throttleMinutes = SMS_THROTTLE_MINUTES;
+    $stmt = $conn->prepare("
+        SELECT created_at 
+        FROM notification_logs 
+        WHERE student_id = ? 
+        AND channel = 'telegram'
+        AND event_type = ? 
+        AND created_at > DATE_SUB(NOW(), INTERVAL ? MINUTE)
+        ORDER BY created_at DESC 
+        LIMIT 1
+    ");
+
+    $stmt->bind_param("isi", $studentId, $eventType, $throttleMinutes);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    return $result->num_rows == 0;
+}
+
+/**
  * Log notification to database
  */
 function logNotification($studentId, $channel, $recipient, $eventType, $message, $status, $response = '') {
@@ -182,5 +207,82 @@ function sendAttendanceNotification($studentId, $studentName, $studentIdNumber, 
     $response = isset($result['response']) ? $result['response'] : $result['message'];
     logSMSNotification($studentId, $phoneNumber, $eventType, $message, $status, $response);
     
+    return $result['success'];
+}
+
+/**
+ * Send Telegram message
+ */
+function sendTelegramMessage($chatId, $message) {
+    if (!TELEGRAM_ENABLED) {
+        return ['success' => false, 'message' => 'Telegram is disabled'];
+    }
+
+    if (TELEGRAM_DEBUG_MODE) {
+        return [
+            'success' => true,
+            'message' => 'DEBUG MODE: Telegram logged but not sent',
+            'debug' => true
+        ];
+    }
+
+    if (TELEGRAM_BOT_TOKEN === '' || $chatId === '') {
+        return ['success' => false, 'message' => 'Telegram token or chat id missing'];
+    }
+
+    $url = 'https://api.telegram.org/bot' . TELEGRAM_BOT_TOKEN . '/sendMessage';
+    $payload = [
+        'chat_id' => $chatId,
+        'text' => $message,
+        'disable_web_page_preview' => true
+    ];
+
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_POST, 1);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($payload));
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($httpCode >= 200 && $httpCode < 300) {
+        return ['success' => true, 'message' => 'Telegram sent', 'response' => $response];
+    }
+    return ['success' => false, 'message' => 'Telegram send failed', 'response' => $response, 'http_code' => $httpCode];
+}
+
+/**
+ * Send attendance notification via Telegram
+ */
+function sendAttendanceTelegramNotification($studentId, $studentName, $studentIdNumber, $eventType) {
+    if (!TELEGRAM_ENABLED) {
+        return false;
+    }
+
+    if ($eventType == 'time_in' && !SMS_SEND_TIME_IN) {
+        return false;
+    }
+    if ($eventType == 'time_out' && !SMS_SEND_TIME_OUT) {
+        return false;
+    }
+
+    if (!canSendTelegram($studentId, $eventType)) {
+        return false;
+    }
+
+    $time = date('g:i A');
+    $template = $eventType == 'time_in' ? TELEGRAM_TIME_IN_MESSAGE : TELEGRAM_TIME_OUT_MESSAGE;
+    $message = str_replace(
+        ['{STUDENT_NAME}', '{STUDENT_ID}', '{TIME}'],
+        [$studentName, $studentIdNumber, $time],
+        $template
+    );
+
+    $result = sendTelegramMessage(TELEGRAM_CHAT_ID, $message);
+
+    $status = $result['success'] ? 'sent' : 'failed';
+    $response = isset($result['response']) ? $result['response'] : $result['message'];
+    logNotification($studentId, 'telegram', TELEGRAM_CHAT_ID, $eventType, $message, $status, $response);
+
     return $result['success'];
 }

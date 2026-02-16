@@ -30,6 +30,10 @@ if (isset($conn) && isset($_SESSION['username'])) {
     }
 }
 
+$sectionsConfig = file_exists(__DIR__ . '/../config/sections.php')
+    ? include __DIR__ . '/../config/sections.php'
+    : ['7' => ['Ruby', 'Mahogany', 'Sunflower'], '8' => ['Ruby', 'Mahogany', 'Sunflower']];
+
 // Ensure attendance table exists for aggregates
 if (isset($conn)) {
     $create_sql = "CREATE TABLE IF NOT EXISTS attendance (
@@ -52,6 +56,24 @@ $presentToday = 0;
 $absentToday = 0;
 $lateToday = 0;
 $today = date('Y-m-d');
+$schoolYear = isset($_SESSION['school_year']) ? trim($_SESSION['school_year']) : '';
+$hasSchoolYearStudents = false;
+$hasSchoolYearAttendance = false;
+$metricsDate = $today;
+$metricsDateLabel = 'Today';
+$dashboardDate = isset($_SESSION['dashboard_date']) ? trim($_SESSION['dashboard_date']) : '';
+$dashboardStatus = isset($_SESSION['dashboard_status']) ? trim($_SESSION['dashboard_status']) : '';
+
+if (isset($conn)) {
+    if ($col = $conn->query("SHOW COLUMNS FROM students LIKE 'school_year'")) {
+        $hasSchoolYearStudents = $col->num_rows > 0;
+        $col->free();
+    }
+    if ($col = $conn->query("SHOW COLUMNS FROM attendance LIKE 'school_year'")) {
+        $hasSchoolYearAttendance = $col->num_rows > 0;
+        $col->free();
+    }
+}
 
 // Recent notifications for header dropdown
 $notifItems = [];
@@ -71,24 +93,365 @@ if (isset($conn)) {
 
 if (isset($conn)) {
     // Distinct year levels
-    if ($res = $conn->query("SELECT COUNT(DISTINCT year_level) AS cnt FROM students")) {
+    if ($hasSchoolYearStudents && $schoolYear !== '') {
+        $stmt = $conn->prepare("SELECT COUNT(DISTINCT year_level) AS cnt FROM students WHERE school_year = ?");
+        if ($stmt) {
+            $stmt->bind_param('s', $schoolYear);
+            $stmt->execute();
+            $res = $stmt->get_result();
+            if ($row = $res->fetch_assoc()) $total_year_levels = (int)$row['cnt'];
+            $stmt->close();
+        }
+    } else if ($res = $conn->query("SELECT COUNT(DISTINCT year_level) AS cnt FROM students")) {
         $row = $res->fetch_assoc();
         $total_year_levels = isset($row['cnt']) ? (int)$row['cnt'] : 0;
         $res->free();
     }
 
-    // Attendance counts for today
-    $stmt = $conn->prepare("SELECT status, COUNT(*) AS cnt FROM attendance WHERE date = ? GROUP BY status");
+    // Attendance counts for today; fallback to latest available date
+    $hasToday = false;
+    if ($hasSchoolYearAttendance && $schoolYear !== '') {
+        $stmt = $conn->prepare("SELECT COUNT(*) AS cnt FROM attendance WHERE date = ? AND school_year = ?");
+        if ($stmt) {
+            $stmt->bind_param('ss', $today, $schoolYear);
+            $stmt->execute();
+            $res = $stmt->get_result();
+            if ($row = $res->fetch_assoc()) $hasToday = ((int)$row['cnt'] > 0);
+            $stmt->close();
+        }
+    } else if ($hasSchoolYearStudents && $schoolYear !== '') {
+        $stmt = $conn->prepare("SELECT COUNT(*) AS cnt FROM attendance a INNER JOIN students s ON a.student_id = s.id WHERE a.date = ? AND s.school_year = ?");
+        if ($stmt) {
+            $stmt->bind_param('ss', $today, $schoolYear);
+            $stmt->execute();
+            $res = $stmt->get_result();
+            if ($row = $res->fetch_assoc()) $hasToday = ((int)$row['cnt'] > 0);
+            $stmt->close();
+        }
+    } else {
+        $stmt = $conn->prepare("SELECT COUNT(*) AS cnt FROM attendance WHERE date = ?");
+        if ($stmt) {
+            $stmt->bind_param('s', $today);
+            $stmt->execute();
+            $res = $stmt->get_result();
+            if ($row = $res->fetch_assoc()) $hasToday = ((int)$row['cnt'] > 0);
+            $stmt->close();
+        }
+    }
+
+    if ($dashboardDate !== '') {
+        $metricsDate = $dashboardDate;
+        $metricsDateLabel = date('M j, Y', strtotime($metricsDate));
+        $hasToday = true;
+    }
+
+    if (!$hasToday) {
+        if ($hasSchoolYearAttendance && $schoolYear !== '') {
+            $stmt = $conn->prepare("SELECT MAX(date) AS d FROM attendance WHERE school_year = ?");
+            if ($stmt) {
+                $stmt->bind_param('s', $schoolYear);
+                $stmt->execute();
+                $res = $stmt->get_result();
+                if ($row = $res->fetch_assoc()) $metricsDate = $row['d'] ?: $today;
+                $stmt->close();
+            }
+        } else if ($hasSchoolYearStudents && $schoolYear !== '') {
+            $stmt = $conn->prepare("SELECT MAX(a.date) AS d FROM attendance a INNER JOIN students s ON a.student_id = s.id WHERE s.school_year = ?");
+            if ($stmt) {
+                $stmt->bind_param('s', $schoolYear);
+                $stmt->execute();
+                $res = $stmt->get_result();
+                if ($row = $res->fetch_assoc()) $metricsDate = $row['d'] ?: $today;
+                $stmt->close();
+            }
+        } else {
+            if ($res = $conn->query("SELECT MAX(date) AS d FROM attendance")) {
+                $row = $res->fetch_assoc();
+                $metricsDate = $row['d'] ?: $today;
+                $res->free();
+            }
+        }
+        if ($metricsDate && $metricsDate !== $today) {
+            $metricsDateLabel = date('M j, Y', strtotime($metricsDate));
+        }
+    }
+
+    if ($dashboardStatus !== '') {
+        if ($hasSchoolYearAttendance && $schoolYear !== '') {
+            $stmt = $conn->prepare("SELECT status, COUNT(*) AS cnt FROM attendance WHERE date = ? AND school_year = ? AND status = ? GROUP BY status");
+            if ($stmt) {
+                $stmt->bind_param('sss', $metricsDate, $schoolYear, $dashboardStatus);
+                $stmt->execute();
+                $res = $stmt->get_result();
+                while ($row = $res->fetch_assoc()) {
+                    $status = $row['status'];
+                    $cnt = (int)$row['cnt'];
+                    if ($status === 'Present') $presentToday = $cnt;
+                    elseif ($status === 'Absent') $absentToday = $cnt;
+                    elseif ($status === 'Late') $lateToday = $cnt;
+                }
+                $stmt->close();
+            }
+        } else if ($hasSchoolYearStudents && $schoolYear !== '') {
+            $stmt = $conn->prepare("SELECT a.status, COUNT(*) AS cnt FROM attendance a INNER JOIN students s ON a.student_id = s.id WHERE a.date = ? AND s.school_year = ? AND a.status = ? GROUP BY a.status");
+            if ($stmt) {
+                $stmt->bind_param('sss', $metricsDate, $schoolYear, $dashboardStatus);
+                $stmt->execute();
+                $res = $stmt->get_result();
+                while ($row = $res->fetch_assoc()) {
+                    $status = $row['status'];
+                    $cnt = (int)$row['cnt'];
+                    if ($status === 'Present') $presentToday = $cnt;
+                    elseif ($status === 'Absent') $absentToday = $cnt;
+                    elseif ($status === 'Late') $lateToday = $cnt;
+                }
+                $stmt->close();
+            }
+        } else {
+            $stmt = $conn->prepare("SELECT status, COUNT(*) AS cnt FROM attendance WHERE date = ? AND status = ? GROUP BY status");
+            if ($stmt) {
+                $stmt->bind_param('ss', $metricsDate, $dashboardStatus);
+                $stmt->execute();
+                $res = $stmt->get_result();
+                while ($row = $res->fetch_assoc()) {
+                    $status = $row['status'];
+                    $cnt = (int)$row['cnt'];
+                    if ($status === 'Present') $presentToday = $cnt;
+                    elseif ($status === 'Absent') $absentToday = $cnt;
+                    elseif ($status === 'Late') $lateToday = $cnt;
+                }
+                $stmt->close();
+            }
+        }
+    } else if ($hasSchoolYearAttendance && $schoolYear !== '') {
+        $stmt = $conn->prepare("SELECT status, COUNT(*) AS cnt FROM attendance WHERE date = ? AND school_year = ? GROUP BY status");
+        if ($stmt) {
+            $stmt->bind_param('ss', $metricsDate, $schoolYear);
+            $stmt->execute();
+            $res = $stmt->get_result();
+            while ($row = $res->fetch_assoc()) {
+                $status = $row['status'];
+                $cnt = (int)$row['cnt'];
+                if ($status === 'Present') $presentToday = $cnt;
+                elseif ($status === 'Absent') $absentToday = $cnt;
+                elseif ($status === 'Late') $lateToday = $cnt;
+            }
+            $stmt->close();
+        }
+    } else if ($hasSchoolYearStudents && $schoolYear !== '') {
+        $stmt = $conn->prepare("SELECT a.status, COUNT(*) AS cnt FROM attendance a INNER JOIN students s ON a.student_id = s.id WHERE a.date = ? AND s.school_year = ? GROUP BY a.status");
+        if ($stmt) {
+            $stmt->bind_param('ss', $metricsDate, $schoolYear);
+            $stmt->execute();
+            $res = $stmt->get_result();
+            while ($row = $res->fetch_assoc()) {
+                $status = $row['status'];
+                $cnt = (int)$row['cnt'];
+                if ($status === 'Present') $presentToday = $cnt;
+                elseif ($status === 'Absent') $absentToday = $cnt;
+                elseif ($status === 'Late') $lateToday = $cnt;
+            }
+            $stmt->close();
+        }
+    } else {
+        $stmt = $conn->prepare("SELECT status, COUNT(*) AS cnt FROM attendance WHERE date = ? GROUP BY status");
+        if ($stmt) {
+            $stmt->bind_param('s', $metricsDate);
+            $stmt->execute();
+            $res = $stmt->get_result();
+            while ($row = $res->fetch_assoc()) {
+                $status = $row['status'];
+                $cnt = (int)$row['cnt'];
+                if ($status === 'Present') $presentToday = $cnt;
+                elseif ($status === 'Absent') $absentToday = $cnt;
+                elseif ($status === 'Late') $lateToday = $cnt;
+            }
+            $stmt->close();
+        }
+    }
+}
+
+// Additional dashboard insights
+$totalStudents = 0;
+$attendanceRateToday = 0.0;
+$onTimeRate = 0.0;
+$trendLabels = [];
+$trendRates = [];
+$trendPresent = [];
+$trendLate = [];
+$trendAbsent = [];
+$alwaysPresentLeaders = [];
+$topSubjects = [];
+$sectionLeaders = [];
+
+function get_total_students($conn, $schoolYear, $hasSchoolYearStudents) {
+    if (!$conn) return 0;
+    $total = 0;
+    if ($hasSchoolYearStudents && $schoolYear !== '') {
+        $stmt = $conn->prepare("SELECT COUNT(*) AS cnt FROM students WHERE school_year = ?");
+        if ($stmt) {
+            $stmt->bind_param('s', $schoolYear);
+            $stmt->execute();
+            $res = $stmt->get_result();
+            if ($row = $res->fetch_assoc()) $total = (int)$row['cnt'];
+            $stmt->close();
+        }
+    } else {
+        if ($res = $conn->query("SELECT COUNT(*) AS cnt FROM students")) {
+            $row = $res->fetch_assoc();
+            $total = isset($row['cnt']) ? (int)$row['cnt'] : 0;
+            $res->free();
+        }
+    }
+    return $total;
+}
+
+function get_attendance_counts($conn, $date, $schoolYear, $hasSchoolYearAttendance, $hasSchoolYearStudents) {
+    $counts = ['Present' => 0, 'Absent' => 0, 'Late' => 0];
+    if (!$conn || !$date) return $counts;
+    if ($hasSchoolYearAttendance && $schoolYear !== '') {
+        $stmt = $conn->prepare("SELECT status, COUNT(*) AS cnt FROM attendance WHERE date = ? AND school_year = ? GROUP BY status");
+        if ($stmt) {
+            $stmt->bind_param('ss', $date, $schoolYear);
+            $stmt->execute();
+            $res = $stmt->get_result();
+            while ($row = $res->fetch_assoc()) {
+                $status = $row['status'];
+                if (isset($counts[$status])) $counts[$status] = (int)$row['cnt'];
+            }
+            $stmt->close();
+        }
+    } else if ($hasSchoolYearStudents && $schoolYear !== '') {
+        $stmt = $conn->prepare("SELECT a.status, COUNT(*) AS cnt FROM attendance a INNER JOIN students s ON a.student_id = s.id WHERE a.date = ? AND s.school_year = ? GROUP BY a.status");
+        if ($stmt) {
+            $stmt->bind_param('ss', $date, $schoolYear);
+            $stmt->execute();
+            $res = $stmt->get_result();
+            while ($row = $res->fetch_assoc()) {
+                $status = $row['status'];
+                if (isset($counts[$status])) $counts[$status] = (int)$row['cnt'];
+            }
+            $stmt->close();
+        }
+    } else {
+        $stmt = $conn->prepare("SELECT status, COUNT(*) AS cnt FROM attendance WHERE date = ? GROUP BY status");
+        if ($stmt) {
+            $stmt->bind_param('s', $date);
+            $stmt->execute();
+            $res = $stmt->get_result();
+            while ($row = $res->fetch_assoc()) {
+                $status = $row['status'];
+                if (isset($counts[$status])) $counts[$status] = (int)$row['cnt'];
+            }
+            $stmt->close();
+        }
+    }
+    return $counts;
+}
+
+if (isset($conn)) {
+    $totalStudents = get_total_students($conn, $schoolYear, $hasSchoolYearStudents);
+    $attendedToday = $presentToday + $lateToday;
+    $attendanceRateToday = $totalStudents > 0 ? round(($attendedToday / $totalStudents) * 100, 1) : 0.0;
+    $onTimeDenom = $presentToday + $lateToday;
+    $onTimeRate = $onTimeDenom > 0 ? round(($presentToday / $onTimeDenom) * 100, 1) : 0.0;
+
+    $baseDate = $metricsDate ?: $today;
+    $trendStart = new DateTime($baseDate);
+    $trendStart->modify('-6 days');
+    for ($i = 0; $i < 7; $i++) {
+        $d = $trendStart->format('Y-m-d');
+        $label = date('M j', strtotime($d));
+        $counts = get_attendance_counts($conn, $d, $schoolYear, $hasSchoolYearAttendance, $hasSchoolYearStudents);
+        $present = $counts['Present'];
+        $late = $counts['Late'];
+        $absent = $counts['Absent'];
+        $rate = $totalStudents > 0 ? round((($present + $late) / $totalStudents) * 100, 1) : 0.0;
+        $trendLabels[] = $label;
+        $trendRates[] = $rate;
+        $trendPresent[] = $present;
+        $trendLate[] = $late;
+        $trendAbsent[] = $absent;
+        $trendStart->modify('+1 day');
+    }
+
+    $rangeStart = (new DateTime($baseDate))->modify('-6 days')->format('Y-m-d');
+    $rangeEnd = $baseDate;
+    $presentSql = "SELECT a.student_id, s.full_name, s.student_id AS student_code, COUNT(*) AS present_count
+                   FROM attendance a
+                   INNER JOIN students s ON a.student_id = s.id
+                   WHERE a.status = 'Present' AND a.date BETWEEN ? AND ?";
+    $presentTypes = 'ss';
+    $presentParams = [$rangeStart, $rangeEnd];
+    if ($hasSchoolYearAttendance && $schoolYear !== '') {
+        $presentSql .= " AND a.school_year = ?";
+        $presentTypes .= 's';
+        $presentParams[] = $schoolYear;
+    } else if ($hasSchoolYearStudents && $schoolYear !== '') {
+        $presentSql .= " AND s.school_year = ?";
+        $presentTypes .= 's';
+        $presentParams[] = $schoolYear;
+    }
+    $presentSql .= " GROUP BY a.student_id, s.full_name, s.student_id ORDER BY present_count DESC, s.full_name ASC LIMIT 5";
+    $stmt = $conn->prepare($presentSql);
     if ($stmt) {
-        $stmt->bind_param('s', $today);
+        $stmt->bind_param($presentTypes, ...$presentParams);
         $stmt->execute();
         $res = $stmt->get_result();
         while ($row = $res->fetch_assoc()) {
-            $status = $row['status'];
-            $cnt = (int)$row['cnt'];
-            if ($status === 'Present') $presentToday = $cnt;
-            elseif ($status === 'Absent') $absentToday = $cnt;
-            elseif ($status === 'Late') $lateToday = $cnt;
+            $alwaysPresentLeaders[] = $row;
+        }
+        $stmt->close();
+    }
+
+    if ($res = $conn->query("SELECT subject_name, COUNT(*) AS cnt FROM curriculum WHERE subject_name IS NOT NULL AND subject_name <> '' GROUP BY subject_name ORDER BY cnt DESC, subject_name ASC LIMIT 5")) {
+        while ($row = $res->fetch_assoc()) {
+            $topSubjects[] = $row;
+        }
+        $res->free();
+    }
+
+    $reportSections = [];
+    foreach ($sectionsConfig as $grade => $sections) {
+        foreach ($sections as $sectionName) {
+            $reportSections[] = $grade . '-' . $sectionName;
+        }
+    }
+    $reportSections = array_values(array_unique($reportSections));
+    $sectionSql = "SELECT
+                    CASE
+                      WHEN section REGEXP '^[0-9]+[ -]' THEN section
+                      ELSE CONCAT(REPLACE(year_level, 'Grade ', ''), '-', section)
+                    END AS section_label,
+                    COUNT(*) AS cnt
+                   FROM students
+                   WHERE section IS NOT NULL AND section <> ''";
+    $sectionTypes = '';
+    $sectionParams = [];
+    if (!empty($reportSections)) {
+        $sectionPlaceholders = implode(',', array_fill(0, count($reportSections), '?'));
+        $sectionSql .= " AND (CASE WHEN section REGEXP '^[0-9]+[ -]' THEN section ELSE CONCAT(REPLACE(year_level, 'Grade ', ''), '-', section) END) IN ($sectionPlaceholders)";
+        $sectionTypes .= str_repeat('s', count($reportSections));
+        $sectionParams = array_merge($sectionParams, $reportSections);
+    }
+    if ($hasSchoolYearStudents && $schoolYear !== '') {
+        $sectionSql .= " AND school_year = ?";
+        $sectionTypes .= 's';
+        $sectionParams[] = $schoolYear;
+    }
+    $sectionSql .= " GROUP BY section_label ORDER BY cnt DESC, section_label ASC LIMIT 5";
+    $stmt = $conn->prepare($sectionSql);
+    if ($stmt) {
+        if ($sectionTypes !== '') {
+            $stmt->bind_param($sectionTypes, ...$sectionParams);
+        }
+        $stmt->execute();
+        $res = $stmt->get_result();
+        while ($row = $res->fetch_assoc()) {
+            $sectionLeaders[] = [
+                'section' => $row['section_label'],
+                'cnt' => $row['cnt']
+            ];
         }
         $stmt->close();
     }
@@ -101,6 +464,7 @@ if (isset($conn)) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WMSU Attendance Tracking</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap">
     <link rel="stylesheet" href="../style.css" />
     <style>
         /* Modal (Pop-up) styles */
@@ -194,6 +558,160 @@ header {
             font-size: 0.85em;
             background-color: #dc3545;
         }
+        .insights {
+            margin-top: 18px;
+            background: linear-gradient(135deg, #fff4f0 0%, #fff7e6 60%, #fef0ea 100%);
+            border: 1px solid #f2d7c9;
+            border-radius: 14px;
+            padding: 16px;
+            position: relative;
+            overflow: hidden;
+        }
+        .insights::before {
+            content: '';
+            position: absolute;
+            width: 260px;
+            height: 260px;
+            right: -120px;
+            top: -120px;
+            background: radial-gradient(circle, rgba(179,0,0,0.14) 0%, rgba(179,0,0,0) 70%);
+        }
+        .insights::after {
+            content: '';
+            position: absolute;
+            width: 220px;
+            height: 220px;
+            left: -110px;
+            bottom: -110px;
+            background: radial-gradient(circle, rgba(255,173,79,0.18) 0%, rgba(255,173,79,0) 68%);
+        }
+        .insights-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            position: relative;
+            z-index: 1;
+        }
+        .insights-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 20px;
+            font-weight: 700;
+            margin: 0;
+            color: #4a0c0c;
+        }
+        .insights-sub {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 13px;
+            color: #6b3d33;
+            margin-top: 2px;
+        }
+        .insights-badge {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: #b30000;
+            color: #fff;
+            box-shadow: 0 6px 18px rgba(179,0,0,0.18);
+        }
+        .insights-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 14px;
+            margin-top: 14px;
+            position: relative;
+            z-index: 1;
+        }
+        .insight-card {
+            background: #fff;
+            border: 1px solid #f0e6e1;
+            border-radius: 12px;
+            padding: 14px;
+            box-shadow: 0 8px 24px rgba(179,0,0,0.06);
+        }
+        .insight-card h4 {
+            margin: 0 0 8px 0;
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 15px;
+            color: #4a0c0c;
+        }
+        .rate-card .rate-label {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 13px;
+            color: #7a4c40;
+        }
+        .rate-card .rate-value {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 36px;
+            font-weight: 700;
+            color: #b30000;
+            margin-top: 6px;
+        }
+        .rate-card .rate-detail {
+            font-size: 12px;
+            color: #7a4c40;
+            margin-top: 4px;
+        }
+        .chart-card canvas {
+            width: 100% !important;
+            height: 220px !important;
+        }
+        .chart-card.wide canvas {
+            height: 240px !important;
+        }
+        .chart-card.tall canvas {
+            height: 260px !important;
+        }
+        .insight-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .insight-list li {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            background: #fff7f2;
+            border: 1px dashed #f2c9b8;
+            padding: 8px 10px;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #4a0c0c;
+        }
+        .insight-pill {
+            font-size: 12px;
+            font-weight: 700;
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: #ffe3d7;
+            color: #b30000;
+            white-space: nowrap;
+        }
+        .insight-empty {
+            font-size: 13px;
+            color: #7a4c40;
+            padding: 6px 0;
+        }
+        .metric-split {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            margin-top: 6px;
+            font-size: 12px;
+            color: #7a4c40;
+        }
+        .metric-split span {
+            background: #fff3ec;
+            padding: 4px 8px;
+            border-radius: 999px;
+            border: 1px solid #f2d7c9;
+        }
     </style>
 </head>
 <body>
@@ -264,22 +782,22 @@ header {
                 <div class="card">
                     <div class="card-label">Total Year Level</div>
                     <span><?php echo htmlspecialchars($total_year_levels, ENT_QUOTES, 'UTF-8'); ?></span>
-                    <a href="reports.php" class="more-info">More info →</a>
+                    <a href="students.php" class="more-info">More info →</a>
                 </div>
                 <div class="card">
-                    <div class="card-label">Present Today</div>
+                    <div class="card-label">Present <?php echo htmlspecialchars($metricsDateLabel, ENT_QUOTES, 'UTF-8'); ?></div>
                     <span><?php echo htmlspecialchars($presentToday, ENT_QUOTES, 'UTF-8'); ?></span>
-                    <a href="studentattendance.php" class="more-info">More info →</a>
+                    <a href="attendance_report.php?filter=day&amp;date=<?php echo urlencode($metricsDate); ?>&amp;status=Present" class="more-info">More info →</a>
                 </div>
                 <div class="card">
-                    <div class="card-label">Absent Today</div>
+                    <div class="card-label">Absent <?php echo htmlspecialchars($metricsDateLabel, ENT_QUOTES, 'UTF-8'); ?></div>
                     <span><?php echo htmlspecialchars($absentToday, ENT_QUOTES, 'UTF-8'); ?></span>
-                    <a href="studentattendance.php" class="more-info">More info →</a>
+                    <a href="attendance_report.php?filter=day&amp;date=<?php echo urlencode($metricsDate); ?>&amp;status=Absent" class="more-info">More info →</a>
                 </div>
                 <div class="card">
-                    <div class="card-label">Late Today</div>
+                    <div class="card-label">Late <?php echo htmlspecialchars($metricsDateLabel, ENT_QUOTES, 'UTF-8'); ?></div>
                     <span><?php echo htmlspecialchars($lateToday, ENT_QUOTES, 'UTF-8'); ?></span>
-                    <a href="studentattendance.php" class="more-info">More info →</a>
+                    <a href="attendance_report.php?filter=day&amp;date=<?php echo urlencode($metricsDate); ?>&amp;status=Late" class="more-info">More info →</a>
                 </div>
             </div>
         </section>
@@ -319,8 +837,91 @@ header {
                 </div>
             </div>
         </section>
+        <section class="insights" aria-label="Attendance insights">
+            <div class="insights-header">
+                <div>
+                    <h3 class="insights-title">Attendance Insights</h3>
+                    <div class="insights-sub">Snapshot for <?php echo htmlspecialchars($metricsDateLabel, ENT_QUOTES, 'UTF-8'); ?></div>
+                </div>
+                <div class="insights-badge">Last 7 days</div>
+            </div>
+            <div class="insights-grid">
+                <div class="insight-card rate-card">
+                    <div class="rate-label">Attendance rate</div>
+                    <div class="rate-value"><?php echo htmlspecialchars(number_format($attendanceRateToday, 1), ENT_QUOTES, 'UTF-8'); ?>%</div>
+                    <div class="rate-detail">Present + Late: <?php echo htmlspecialchars($presentToday + $lateToday, ENT_QUOTES, 'UTF-8'); ?> / <?php echo htmlspecialchars($totalStudents, ENT_QUOTES, 'UTF-8'); ?> students</div>
+                    <div class="metric-split">
+                        <span>On-time: <?php echo htmlspecialchars(number_format($onTimeRate, 1), ENT_QUOTES, 'UTF-8'); ?>%</span>
+                        <span>Late: <?php echo htmlspecialchars(number_format(100 - $onTimeRate, 1), ENT_QUOTES, 'UTF-8'); ?>%</span>
+                    </div>
+                </div>
+                <div class="insight-card chart-card">
+                    <h4>Present vs Late vs Absent</h4>
+                    <canvas id="statusDonut" aria-label="Attendance status chart" role="img"></canvas>
+                </div>
+                <div class="insight-card chart-card wide">
+                    <h4>Attendance rate trend</h4>
+                    <canvas id="trendLine" aria-label="Attendance trend chart" role="img"></canvas>
+                </div>
+                <div class="insight-card chart-card tall">
+                    <h4>Weekly status volume</h4>
+                    <canvas id="trendBars" aria-label="Weekly status volume chart" role="img"></canvas>
+                </div>
+                <div class="insight-card">
+                    <h4>Top 5 always present students</h4>
+                    <?php if (empty($alwaysPresentLeaders)): ?>
+                        <div class="insight-empty">No present records in this range.</div>
+                    <?php else: ?>
+                        <ul class="insight-list">
+                            <?php foreach ($alwaysPresentLeaders as $row): ?>
+                                <?php
+                                    $name = !empty($row['full_name']) ? $row['full_name'] : 'Unknown Student';
+                                    $code = !empty($row['student_code']) ? $row['student_code'] : '';
+                                    $displayName = $code !== '' ? $name . ' (' . $code . ')' : $name;
+                                ?>
+                                <li>
+                                    <span><?php echo htmlspecialchars($displayName, ENT_QUOTES, 'UTF-8'); ?></span>
+                                    <span class="insight-pill"><?php echo htmlspecialchars($row['present_count'], ENT_QUOTES, 'UTF-8'); ?> present</span>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                    <?php endif; ?>
+                </div>
+                <div class="insight-card">
+                    <h4>Most scheduled subjects</h4>
+                    <?php if (empty($topSubjects)): ?>
+                        <div class="insight-empty">No subjects found.</div>
+                    <?php else: ?>
+                        <ul class="insight-list">
+                            <?php foreach ($topSubjects as $row): ?>
+                                <li>
+                                    <span><?php echo htmlspecialchars($row['subject_name'], ENT_QUOTES, 'UTF-8'); ?></span>
+                                    <span class="insight-pill"><?php echo htmlspecialchars($row['cnt'], ENT_QUOTES, 'UTF-8'); ?> schedules</span>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                    <?php endif; ?>
+                </div>
+                <div class="insight-card">
+                    <h4>Sections with most students</h4>
+                    <?php if (empty($sectionLeaders)): ?>
+                        <div class="insight-empty">No sections found.</div>
+                    <?php else: ?>
+                        <ul class="insight-list">
+                            <?php foreach ($sectionLeaders as $row): ?>
+                                <li>
+                                    <span><?php echo htmlspecialchars($row['section'], ENT_QUOTES, 'UTF-8'); ?></span>
+                                    <span class="insight-pill"><?php echo htmlspecialchars($row['cnt'], ENT_QUOTES, 'UTF-8'); ?> students</span>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </section>
     </div>
     
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             // Extra styles for section cards (injected here for convenience)
@@ -329,7 +930,7 @@ header {
                     /* Layout tweaks to prevent page scrolling and reduce vertical space */
                     html,body{height:100%;margin:0;padding:0}
                     /* Match camera.php: make .main flexible with consistent padding */
-                    .main{flex: 1; padding: 20px; box-sizing: border-box; min-height:100%; overflow:hidden}
+                    .main{flex: 1; padding: 20px; box-sizing: border-box; min-height:100%; overflow:auto}
                     .welcome-row{display:flex;justify-content:space-between;align-items:center}
                     /* Stat cards: evenly fill the row so first/last align to container edges */
                     .cards{display:flex;gap:20px;margin-top:20px;align-items:stretch}
@@ -531,6 +1132,108 @@ header {
                 sectionModal.addEventListener('click', (e)=>{ if (e.target === sectionModal) { sectionModal.style.display = 'none'; sectionModal.setAttribute('aria-hidden', 'true'); } });
                 // close on Escape
                 document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') { sectionModal.style.display = 'none'; sectionModal.setAttribute('aria-hidden', 'true'); } });
+            }
+
+            // Insights charts
+            const trendLabels = <?php echo json_encode($trendLabels, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>;
+            const trendRates = <?php echo json_encode($trendRates, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>;
+            const trendPresent = <?php echo json_encode($trendPresent, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>;
+            const trendLate = <?php echo json_encode($trendLate, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>;
+            const trendAbsent = <?php echo json_encode($trendAbsent, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>;
+            const statusCounts = {
+                present: <?php echo (int)$presentToday; ?>,
+                late: <?php echo (int)$lateToday; ?>,
+                absent: <?php echo (int)$absentToday; ?>
+            };
+
+            const donutEl = document.getElementById('statusDonut');
+            if (donutEl && window.Chart) {
+                new Chart(donutEl, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Present', 'Late', 'Absent'],
+                        datasets: [{
+                            data: [statusCounts.present, statusCounts.late, statusCounts.absent],
+                            backgroundColor: ['#2e7d32', '#f9a825', '#c62828'],
+                            borderWidth: 0
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: { position: 'bottom', labels: { boxWidth: 12 } },
+                            tooltip: { backgroundColor: '#2b2b2b' }
+                        },
+                        cutout: '64%'
+                    }
+                });
+            }
+
+            const trendEl = document.getElementById('trendLine');
+            if (trendEl && window.Chart) {
+                new Chart(trendEl, {
+                    type: 'line',
+                    data: {
+                        labels: trendLabels,
+                        datasets: [{
+                            label: 'Attendance rate (%)',
+                            data: trendRates,
+                            borderColor: '#b30000',
+                            backgroundColor: 'rgba(179,0,0,0.12)',
+                            pointRadius: 3,
+                            tension: 0.35,
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: { beginAtZero: true, max: 100, ticks: { callback: (v) => `${v}%` } }
+                        },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { backgroundColor: '#2b2b2b' }
+                        }
+                    }
+                });
+            }
+
+            const trendBarsEl = document.getElementById('trendBars');
+            if (trendBarsEl && window.Chart) {
+                new Chart(trendBarsEl, {
+                    type: 'bar',
+                    data: {
+                        labels: trendLabels,
+                        datasets: [
+                            {
+                                label: 'Present',
+                                data: trendPresent,
+                                backgroundColor: '#2e7d32'
+                            },
+                            {
+                                label: 'Late',
+                                data: trendLate,
+                                backgroundColor: '#f9a825'
+                            },
+                            {
+                                label: 'Absent',
+                                data: trendAbsent,
+                                backgroundColor: '#c62828'
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            x: { stacked: true },
+                            y: { stacked: true, beginAtZero: true }
+                        },
+                        plugins: {
+                            legend: { position: 'bottom', labels: { boxWidth: 12 } },
+                            tooltip: { backgroundColor: '#2b2b2b' }
+                        }
+                    }
+                });
             }
         });
     </script>

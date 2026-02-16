@@ -3,11 +3,26 @@ session_start();
 require_once __DIR__ . '/../auth.php';
 require_once __DIR__ . '/../db.php';
 
-// Get filter inputs
-$filterType = isset($_GET['filter']) ? $_GET['filter'] : 'week'; // day, week, month
-$filterDate = isset($_GET['date']) ? $_GET['date'] : date('Y-m-d');
-$filterYear = isset($_GET['year']) ? trim($_GET['year']) : '';
-$filterSection = isset($_GET['section']) ? trim($_GET['section']) : '';
+// Get filter inputs (persist in session so returning keeps the last selection)
+$filterType = isset($_GET['filter']) ? $_GET['filter'] : (isset($_SESSION['report_filter']) ? $_SESSION['report_filter'] : 'week'); // day, week, month
+$filterDate = isset($_GET['date']) ? $_GET['date'] : (isset($_SESSION['report_date']) ? $_SESSION['report_date'] : date('Y-m-d'));
+$filterYear = isset($_GET['year']) ? trim($_GET['year']) : (isset($_SESSION['report_year']) ? $_SESSION['report_year'] : '');
+$filterSection = isset($_GET['section']) ? trim($_GET['section']) : (isset($_SESSION['report_section']) ? $_SESSION['report_section'] : '');
+$filterStatus = isset($_GET['status']) ? trim($_GET['status']) : (isset($_SESSION['report_status']) ? $_SESSION['report_status'] : '');
+$allowedStatuses = ['Present', 'Late', 'Absent'];
+if (!in_array($filterStatus, $allowedStatuses, true)) {
+  $filterStatus = '';
+}
+
+$_SESSION['report_filter'] = $filterType;
+$_SESSION['report_date'] = $filterDate;
+$_SESSION['report_year'] = $filterYear;
+$_SESSION['report_section'] = $filterSection;
+$_SESSION['report_status'] = $filterStatus;
+
+// Persist report selection for dashboard cards
+$_SESSION['dashboard_date'] = $filterDate;
+$_SESSION['dashboard_status'] = $filterStatus;
 
 // Calculate date range based on filter type
 $startDate = $filterDate;
@@ -38,15 +53,46 @@ if ($filterYear !== '') {
   }
 }
 
+// Ensure recognition_logs table exists for detection counts
+$createLogs = "CREATE TABLE IF NOT EXISTS recognition_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    predicted_id INT NOT NULL,
+    actual_id INT NOT NULL,
+    is_correct TINYINT(1) NOT NULL DEFAULT 0,
+    section VARCHAR(100) DEFAULT NULL,
+    log_date DATE NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
+$conn->query($createLogs);
+
 // Build attendance query
 $attendanceRecords = [];
 $summaryStats = ['Present' => 0, 'Late' => 0, 'Absent' => 0];
 
-$sql = "SELECT a.*, s.full_name, s.year_level, s.section FROM attendance a
-        LEFT JOIN students s ON a.student_id = s.id
-        WHERE a.date >= ? AND a.date <= ?";
+$sql = "SELECT a.student_id, a.date, a.status, a.time_in, a.time_out, a.section, 
+               s.id, s.full_name, s.year_level, s.section AS student_section, 
+               COALESCE(r.detect_count, 0) AS detect_count
+  FROM attendance a
+  LEFT JOIN students s ON a.student_id = s.id
+  LEFT JOIN (
+    SELECT actual_id AS student_id, log_date, COUNT(*) AS detect_count
+    FROM recognition_logs
+    WHERE is_correct = 1 AND log_date >= ? AND log_date <= ?";
 $types = 'ss';
 $params = [$startDate, $endDate];
+
+if ($filterSection !== '') {
+  $sql .= " AND section = ?";
+  $types .= 's';
+  $params[] = $filterSection;
+}
+
+$sql .= " GROUP BY actual_id, log_date
+  ) r ON r.student_id = a.student_id AND r.log_date = a.date
+  WHERE a.date >= ? AND a.date <= ?";
+$types .= 'ss';
+$params[] = $startDate;
+$params[] = $endDate;
 
 if (!empty($gradeLevels)) {
   $placeholders = implode(',', array_fill(0, count($gradeLevels), '?'));
@@ -59,6 +105,12 @@ if ($filterSection !== '') {
   $sql .= " AND a.section = ?";
   $types .= 's';
   $params[] = $filterSection;
+}
+
+if ($filterStatus !== '') {
+  $sql .= " AND a.status = ?";
+  $types .= 's';
+  $params[] = $filterStatus;
 }
 
 $sql .= " ORDER BY a.date DESC, s.full_name ASC";
@@ -77,6 +129,84 @@ if ($stmt) {
     }
   }
   $stmt->close();
+}
+
+function grade_variants($grade) {
+  $variants = [];
+  if ($grade === null || $grade === '') return $variants;
+  $g = trim((string)$grade);
+  $variants[] = $g;
+  if (stripos($g, 'Grade') === 0) {
+    $num = trim(str_ireplace('Grade', '', $g));
+    if ($num !== '' && ctype_digit($num)) $variants[] = $num;
+  } elseif (ctype_digit($g)) {
+    $variants[] = 'Grade ' . $g;
+  }
+  return array_values(array_unique($variants));
+}
+
+function get_subject_count_for_day($grade, $section, $dayName, $countsMap) {
+  $variants = grade_variants($grade);
+  $sectionKey = trim((string)$section);
+  foreach ($variants as $variant) {
+    if (isset($countsMap[$variant][$sectionKey][$dayName])) {
+      return (int)$countsMap[$variant][$sectionKey][$dayName];
+    }
+    if (isset($countsMap[$variant][''][$dayName])) {
+      return (int)$countsMap[$variant][''][$dayName];
+    }
+  }
+  return 0;
+}
+
+// Preload curriculum subject counts for the report rows
+$subjectCounts = [];
+$gradeSet = [];
+$sectionSet = [];
+foreach ($attendanceRecords as $record) {
+  if (!empty($record['year_level'])) {
+    foreach (grade_variants($record['year_level']) as $gv) {
+      $gradeSet[$gv] = true;
+    }
+  }
+  if (!empty($record['section'])) {
+    $sectionSet[trim($record['section'])] = true;
+  }
+}
+
+if (!empty($gradeSet)) {
+  $gradeList = array_keys($gradeSet);
+  $gradePlaceholders = implode(',', array_fill(0, count($gradeList), '?'));
+  $currSql = "SELECT grade_level, section, day_of_week, COUNT(*) AS cnt
+              FROM curriculum
+              WHERE grade_level IN ($gradePlaceholders)";
+  $currParams = $gradeList;
+  $currTypes = str_repeat('s', count($gradeList));
+
+  if (!empty($sectionSet)) {
+    $sectList = array_keys($sectionSet);
+    $sectPlaceholders = implode(',', array_fill(0, count($sectList), '?'));
+    $currSql .= " AND (section IN ($sectPlaceholders) OR section = '' OR section IS NULL)";
+    $currParams = array_merge($currParams, $sectList);
+    $currTypes .= str_repeat('s', count($sectList));
+  }
+
+  $currSql .= " GROUP BY grade_level, section, day_of_week";
+  $stmt = $conn->prepare($currSql);
+  if ($stmt) {
+    $stmt->bind_param($currTypes, ...$currParams);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    while ($row = $res->fetch_assoc()) {
+      $g = $row['grade_level'] ?? '';
+      $s = trim((string)($row['section'] ?? ''));
+      $d = $row['day_of_week'] ?? '';
+      if (!isset($subjectCounts[$g])) $subjectCounts[$g] = [];
+      if (!isset($subjectCounts[$g][$s])) $subjectCounts[$g][$s] = [];
+      $subjectCounts[$g][$s][$d] = (int)$row['cnt'];
+    }
+    $stmt->close();
+  }
 }
 
 // Fetch grade levels and sections for dropdowns
@@ -130,7 +260,11 @@ if ($filterYear !== '' && !empty($gradeLevels)) {
     .summary-card h4 { margin: 0 0 6px 0; font-size: 13px; color: #666; font-weight: 600; }
     .summary-card .count { font-size: 24px; font-weight: 700; color: #b30000; }
     .records-container { background: #fff; padding: 16px; border-radius: 8px; margin-top: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-    .records-title { font-size: 16px; font-weight: 700; margin: 0 0 12px 0; color: #b30000; }
+    .records-title { font-size: 16px; font-weight: 700; margin: 0; color: #b30000; }
+    .records-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px 0; }
+    .records-actions { display: inline-flex; gap: 8px; }
+    .records-actions button { display: inline-flex; align-items: center; gap: 6px; background: #fff; color: #b30000; padding: 6px 10px; border-radius: 4px; text-decoration: none; font-size: 12px; border: 1px solid #b30000; cursor: pointer; }
+    .records-actions button:hover { background: #f7f7f7; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th { background: #f7f7f7; padding: 10px 8px; text-align: left; font-weight: 600; border-bottom: 2px solid #e0e0e0; }
     td { padding: 8px; border-bottom: 1px solid #eee; }
@@ -141,6 +275,8 @@ if ($filterYear !== '' && !empty($gradeLevels)) {
     .status-absent { background: #f8d7da; color: #721c24; }
     .back-btn { display: inline-flex; align-items: center; gap: 6px; background: #b30000; color: #fff; padding: 8px 12px; border-radius: 4px; text-decoration: none; font-size: 13px; }
     .back-btn:hover { background: #990000; }
+    .print-btn { display: inline-flex; align-items: center; gap: 6px; background: #fff; color: #b30000; padding: 8px 12px; border-radius: 4px; text-decoration: none; font-size: 13px; border: 1px solid #b30000; }
+    .print-btn:hover { background: #f7f7f7; }
   </style>
 </head>
 <body>
@@ -156,6 +292,7 @@ if ($filterYear !== '' && !empty($gradeLevels)) {
           </svg>
           <span class="notif-count"><?php echo htmlspecialchars($notifCountDisplay, ENT_QUOTES, 'UTF-8'); ?></span>
         </a>
+        <button type="button" class="print-btn" onclick="window.print();"><i class="fas fa-print"></i> Print</button>
         <a href="dashboard.php" class="back-btn"><i class="fas fa-arrow-left"></i> Back</a>
       </div>
     </header>
@@ -199,6 +336,15 @@ if ($filterYear !== '' && !empty($gradeLevels)) {
               <?php endforeach; ?>
             </select>
           </div>
+          <div class="filter-group">
+            <label for="status">Status:</label>
+            <select name="status" id="status" onchange="this.form.submit();">
+              <option value="">-- All Statuses --</option>
+              <option value="Present" <?php echo $filterStatus === 'Present' ? 'selected' : ''; ?>>Present</option>
+              <option value="Late" <?php echo $filterStatus === 'Late' ? 'selected' : ''; ?>>Late</option>
+              <option value="Absent" <?php echo $filterStatus === 'Absent' ? 'selected' : ''; ?>>Absent</option>
+            </select>
+          </div>
         </div>
       </form>
     </div>
@@ -225,17 +371,23 @@ if ($filterYear !== '' && !empty($gradeLevels)) {
 
     <!-- Records Table -->
     <div class="records-container">
-      <h3 class="records-title">
-        <?php
-          if ($filterType === 'day') {
-            echo 'Daily Attendance - ' . date('F j, Y', strtotime($filterDate));
-          } elseif ($filterType === 'week') {
-            echo 'Weekly Attendance - ' . date('M j', strtotime($startDate)) . ' to ' . date('M j, Y', strtotime($endDate));
-          } else {
-            echo 'Monthly Attendance - ' . date('F Y', strtotime($filterDate));
-          }
-        ?>
-      </h3>
+      <div class="records-header">
+        <h3 class="records-title">
+          <?php
+            if ($filterType === 'day') {
+              echo 'Daily Attendance - ' . date('F j, Y', strtotime($filterDate));
+            } elseif ($filterType === 'week') {
+              echo 'Weekly Attendance - ' . date('M j', strtotime($startDate)) . ' to ' . date('M j, Y', strtotime($endDate));
+            } else {
+              echo 'Monthly Attendance - ' . date('F Y', strtotime($filterDate));
+            }
+          ?>
+        </h3>
+        <div class="records-actions">
+          <button type="button" onclick="window.print();"><i class="fas fa-print"></i> Print</button>
+          <button type="button" id="exportPdfBtn"><i class="fas fa-file-pdf"></i> PDF</button>
+        </div>
+      </div>
       
       <?php if (empty($attendanceRecords)): ?>
         <p style="text-align: center; color: #999; padding: 20px;">No attendance records found for the selected period.</p>
@@ -252,6 +404,7 @@ if ($filterYear !== '' && !empty($gradeLevels)) {
                 <th>Status</th>
                 <th>Time-In</th>
                 <th>Time-Out</th>
+                <th>Detected/Subjects</th>
               </tr>
             </thead>
             <tbody>
@@ -276,6 +429,12 @@ if ($filterYear !== '' && !empty($gradeLevels)) {
                   </td>
                   <td><?php echo !empty($record['time_in']) ? date('h:i A', strtotime($record['time_in'])) : '-'; ?></td>
                   <td><?php echo !empty($record['time_out']) ? date('h:i A', strtotime($record['time_out'])) : '-'; ?></td>
+                  <?php
+                    $dayName = date('l', strtotime($record['date']));
+                    $subjectTotal = get_subject_count_for_day($record['year_level'] ?? '', $record['section'] ?? '', $dayName, $subjectCounts);
+                    $detectCount = (int)($record['detect_count'] ?? 0);
+                  ?>
+                  <td><?php echo $detectCount . '/' . $subjectTotal; ?></td>
                 </tr>
               <?php endforeach; ?>
             </tbody>
@@ -284,5 +443,56 @@ if ($filterYear !== '' && !empty($gradeLevels)) {
       <?php endif; ?>
     </div>
   </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script>
+    async function exportReportPdf() {
+      const container = document.querySelector('.records-container');
+      if (!container) return;
+
+      const { jsPDF } = window.jspdf || {};
+      if (!jsPDF) return;
+
+      const originalScroll = container.scrollTop;
+      container.scrollTop = 0;
+
+      const canvas = await html2canvas(container, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff'
+      });
+
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'pt', 'a4');
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+
+      const imgWidth = pageWidth - 40;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      let position = 20;
+      let heightLeft = imgHeight;
+
+      pdf.addImage(imgData, 'PNG', 20, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight + 20;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 20, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+
+      const filename = 'attendance-report-' + new Date().toISOString().split('T')[0] + '.pdf';
+      pdf.save(filename);
+
+      container.scrollTop = originalScroll;
+    }
+
+    const exportBtn = document.getElementById('exportPdfBtn');
+    if (exportBtn) {
+      exportBtn.addEventListener('click', exportReportPdf);
+    }
+  </script>
 </body>
 </html>

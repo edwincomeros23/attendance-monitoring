@@ -8,7 +8,7 @@ This script starts ffmpeg to convert an RTSP stream to HLS segments in the given
 #>
 
 param(
-  [string]$Rtsp = "rtsp://admin01:admin0101@192.168.254.146:554/stream1",
+  [string]$Rtsp = "rtsp://admin01:admin0101@192.168.254.147:554/stream1",
   [string]$Ffmpeg = "C:\\xampp\\htdocs\\attendance-monitoring\\ffmpeg-8.0-essentials_build\\bin\\ffmpeg.exe",
   [string]$OutDir = "C:\\xampp\\htdocs\\attendance-monitoring\\stream"
 )
@@ -25,7 +25,8 @@ if (-not (Test-Path $OutDir)) {
 
 $seg = Join-Path $OutDir "segment_%03d.ts"
 $m3u8 = Join-Path $OutDir "index.m3u8"
-$log = Join-Path $OutDir "ffmpeg.log"
+$logStamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$log = Join-Path $OutDir "ffmpeg_$logStamp.log"
 
 Write-Host "Clearing old HLS artifacts"
 Remove-Item -Path (Join-Path $OutDir "*.ts") -Force -ErrorAction SilentlyContinue

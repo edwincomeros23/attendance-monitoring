@@ -49,9 +49,17 @@ $emailSuccess = sendAttendanceEmailNotification(
     $eventType
 );
 
+$telegramSuccess = sendAttendanceTelegramNotification(
+    $studentId,
+    $student['full_name'],
+    $student['student_id'],
+    $eventType
+);
+
 echo json_encode([
-    'success' => ($smsSuccess || $emailSuccess),
+    'success' => ($smsSuccess || $emailSuccess || $telegramSuccess),
     'sms' => $smsSuccess,
     'email' => $emailSuccess,
+    'telegram' => $telegramSuccess,
     'message' => 'Notification processed'
 ]);

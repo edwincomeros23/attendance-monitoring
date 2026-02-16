@@ -1,6 +1,283 @@
 <?php
 include '../db.php';
 $section = isset($_GET['section']) ? $conn->real_escape_string($_GET['section']) : '';
+
+function grade_variants_local($grade) {
+  $variants = [];
+  if ($grade === null || $grade === '') return $variants;
+  $g = trim((string)$grade);
+  $variants[] = $g;
+  if (stripos($g, 'Grade') === 0) {
+    $num = trim(str_ireplace('Grade', '', $g));
+    if ($num !== '' && ctype_digit($num)) $variants[] = $num;
+  } elseif (ctype_digit($g)) {
+    $variants[] = 'Grade ' . $g;
+  }
+  return array_values(array_unique($variants));
+}
+
+if (isset($_GET['print_attendance_json'])) {
+  $studentDbId = isset($_GET['student_db_id']) ? (int)$_GET['student_db_id'] : 0;
+  $printDateRaw = isset($_GET['date']) ? trim($_GET['date']) : '';
+  $printTs = $printDateRaw !== '' ? strtotime($printDateRaw) : false;
+  $printDate = $printTs ? date('Y-m-d', $printTs) : date('Y-m-d');
+  $dayName = date('l', strtotime($printDate));
+
+  header('Content-Type: application/json; charset=utf-8');
+
+  if ($studentDbId <= 0) {
+    echo json_encode(['ok' => false, 'error' => 'Invalid student id']);
+    exit;
+  }
+
+  $student = null;
+  $stmt = $conn->prepare('SELECT id, student_id, full_name, year_level, section FROM students WHERE id = ?');
+  if ($stmt) {
+    $stmt->bind_param('i', $studentDbId);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    if ($res) $student = $res->fetch_assoc();
+    $stmt->close();
+  }
+
+  if (!$student) {
+    echo json_encode(['ok' => false, 'error' => 'Student not found']);
+    exit;
+  }
+
+  $gradeLevels = grade_variants_local($student['year_level'] ?? '');
+  $sectionName = trim((string)($student['section'] ?? ''));
+
+  $subjects = [];
+  if (!empty($gradeLevels)) {
+    $gradePlaceholders = implode(',', array_fill(0, count($gradeLevels), '?'));
+    $sql = "SELECT subject_name, day_of_week, time_in, time_out, grade_level, section
+            FROM curriculum
+            WHERE grade_level IN ($gradePlaceholders)
+              AND (section = ? OR section = '' OR section IS NULL)
+              AND (day_of_week = ? OR day_of_week = '' OR day_of_week IS NULL)
+            ORDER BY time_in ASC";
+    $stmt = $conn->prepare($sql);
+    if ($stmt) {
+      $types = str_repeat('s', count($gradeLevels)) . 'ss';
+      $params = array_merge($gradeLevels, [$sectionName, $dayName]);
+      $stmt->bind_param($types, ...$params);
+      $stmt->execute();
+      $res = $stmt->get_result();
+      while ($row = $res->fetch_assoc()) {
+        $subjects[] = $row;
+      }
+      $stmt->close();
+    }
+  }
+
+  $logTimes = [];
+  $logStmt = $conn->prepare("SELECT created_at FROM recognition_logs WHERE actual_id = ? AND log_date = ? AND is_correct = 1 AND (section = ? OR section = '' OR section IS NULL) ORDER BY created_at ASC");
+  if ($logStmt) {
+    $logStmt->bind_param('iss', $studentDbId, $printDate, $sectionName);
+    $logStmt->execute();
+    $logRes = $logStmt->get_result();
+    while ($logRow = $logRes->fetch_assoc()) {
+      $logTimes[] = strtotime($logRow['created_at']);
+    }
+    $logStmt->close();
+  }
+
+  function time_range_match_json($logTimes, $date, $startTime, $endTime) {
+    if (!$startTime || !$endTime) return null;
+    $startTs = strtotime($date . ' ' . $startTime);
+    $endTs = strtotime($date . ' ' . $endTime);
+    if (!$startTs || !$endTs) return null;
+    foreach ($logTimes as $ts) {
+      if ($ts >= $startTs && $ts <= $endTs) {
+        return $ts;
+      }
+    }
+    return null;
+  }
+
+  $rows = [];
+  foreach ($subjects as $subj) {
+    $matchTs = time_range_match_json($logTimes, $printDate, $subj['time_in'] ?? null, $subj['time_out'] ?? null);
+    $rows[] = [
+      'subject' => $subj['subject_name'] ?? '',
+      'time_in' => $subj['time_in'] ?? null,
+      'time_out' => $subj['time_out'] ?? null,
+      'status' => $matchTs ? 'Present' : 'Absent',
+      'detected_time' => $matchTs ? date('H:i:s', $matchTs) : null
+    ];
+  }
+
+  echo json_encode([
+    'ok' => true,
+    'student' => [
+      'full_name' => $student['full_name'] ?? '',
+      'student_id' => $student['student_id'] ?? '',
+      'year_level' => $student['year_level'] ?? '',
+      'section' => $sectionName
+    ],
+    'date' => $printDate,
+    'day_name' => $dayName,
+    'rows' => $rows
+  ]);
+  exit;
+}
+
+if (isset($_GET['print_attendance'])) {
+  $studentDbId = isset($_GET['student_db_id']) ? (int)$_GET['student_db_id'] : 0;
+  $printDateRaw = isset($_GET['date']) ? trim($_GET['date']) : '';
+  $printTs = $printDateRaw !== '' ? strtotime($printDateRaw) : false;
+  $printDate = $printTs ? date('Y-m-d', $printTs) : date('Y-m-d');
+  $dayName = date('l', strtotime($printDate));
+
+  if ($studentDbId <= 0) {
+    echo 'Invalid student id.';
+    exit;
+  }
+
+  $student = null;
+  $stmt = $conn->prepare('SELECT id, student_id, full_name, year_level, section FROM students WHERE id = ?');
+  if ($stmt) {
+    $stmt->bind_param('i', $studentDbId);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    if ($res) $student = $res->fetch_assoc();
+    $stmt->close();
+  }
+
+  if (!$student) {
+    echo 'Student not found.';
+    exit;
+  }
+
+  $gradeLevels = grade_variants_local($student['year_level'] ?? '');
+  $sectionName = trim((string)($student['section'] ?? ''));
+
+  $subjects = [];
+  if (!empty($gradeLevels)) {
+    $gradePlaceholders = implode(',', array_fill(0, count($gradeLevels), '?'));
+    $sql = "SELECT subject_name, day_of_week, time_in, time_out, grade_level, section
+            FROM curriculum
+            WHERE grade_level IN ($gradePlaceholders)
+              AND (section = ? OR section = '' OR section IS NULL)
+              AND (day_of_week = ? OR day_of_week = '' OR day_of_week IS NULL)
+            ORDER BY time_in ASC";
+    $stmt = $conn->prepare($sql);
+    if ($stmt) {
+      $types = str_repeat('s', count($gradeLevels)) . 'ss';
+      $params = array_merge($gradeLevels, [$sectionName, $dayName]);
+      $stmt->bind_param($types, ...$params);
+      $stmt->execute();
+      $res = $stmt->get_result();
+      while ($row = $res->fetch_assoc()) {
+        $subjects[] = $row;
+      }
+      $stmt->close();
+    }
+  }
+
+  $logTimes = [];
+  $logStmt = $conn->prepare("SELECT created_at FROM recognition_logs WHERE actual_id = ? AND log_date = ? AND is_correct = 1 AND (section = ? OR section = '' OR section IS NULL) ORDER BY created_at ASC");
+  if ($logStmt) {
+    $logStmt->bind_param('iss', $studentDbId, $printDate, $sectionName);
+    $logStmt->execute();
+    $logRes = $logStmt->get_result();
+    while ($logRow = $logRes->fetch_assoc()) {
+      $logTimes[] = strtotime($logRow['created_at']);
+    }
+    $logStmt->close();
+  }
+
+  function time_range_match($logTimes, $date, $startTime, $endTime) {
+    if (!$startTime || !$endTime) return null;
+    $startTs = strtotime($date . ' ' . $startTime);
+    $endTs = strtotime($date . ' ' . $endTime);
+    if (!$startTs || !$endTs) return null;
+    foreach ($logTimes as $ts) {
+      if ($ts >= $startTs && $ts <= $endTs) {
+        return $ts;
+      }
+    }
+    return null;
+  }
+
+  $studentName = htmlspecialchars($student['full_name'] ?? '');
+  $studentId = htmlspecialchars($student['student_id'] ?? '');
+  $studentGrade = htmlspecialchars($student['year_level'] ?? '');
+  $studentSection = htmlspecialchars($sectionName);
+  $printDateLabel = date('F j, Y', strtotime($printDate));
+  ?>
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Attendance Record - <?php echo $studentName; ?></title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 24px; color: #222; }
+      h1 { font-size: 20px; margin: 0 0 6px 0; }
+      .meta { margin: 0 0 12px 0; font-size: 13px; color: #555; }
+      table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+      th, td { padding: 8px 10px; border-bottom: 1px solid #eee; text-align: left; font-size: 13px; }
+      th { background: #f7f7f7; }
+      .status-present { color: #1b5e20; font-weight: 700; }
+      .status-absent { color: #666; font-weight: 700; }
+      .print-note { font-size: 12px; color: #777; margin-top: 10px; }
+      @media print { .print-note { display: none; } }
+    </style>
+  </head>
+  <body>
+    <h1>Attendance Record (Scheduled Subjects)</h1>
+        <div class="meta">
+      <div><strong>Student:</strong> <?php echo $studentName; ?> (<?php echo $studentId; ?>)</div>
+      <div><strong>Grade/Section:</strong> <?php echo $studentGrade; ?> / <?php echo $studentSection; ?></div>
+      <div><strong>Date:</strong> <?php echo $printDateLabel; ?> (<?php echo htmlspecialchars($dayName); ?>)</div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Subject</th>
+          <th>Time In</th>
+          <th>Time Out</th>
+          <th>Status</th>
+          <th>Detected Time</th>
+        </tr>
+      </thead>
+      <tbody>
+        <?php if (empty($subjects)): ?>
+          <tr><td colspan="5">No scheduled subjects for this day.</td></tr>
+        <?php else: ?>
+          <?php foreach ($subjects as $subj): ?>
+            <?php
+              $subjectName = htmlspecialchars($subj['subject_name'] ?? '');
+              $timeIn = !empty($subj['time_in']) ? date('h:i A', strtotime($subj['time_in'])) : '-';
+              $timeOut = !empty($subj['time_out']) ? date('h:i A', strtotime($subj['time_out'])) : '-';
+              $matchTs = time_range_match($logTimes, $printDate, $subj['time_in'] ?? null, $subj['time_out'] ?? null);
+              $statusText = $matchTs ? 'Present' : 'Absent';
+              $statusClass = $matchTs ? 'status-present' : 'status-absent';
+              $detectedTime = $matchTs ? date('h:i A', $matchTs) : '-';
+            ?>
+            <tr>
+              <td><?php echo $subjectName; ?></td>
+              <td><?php echo $timeIn; ?></td>
+              <td><?php echo $timeOut; ?></td>
+              <td class="<?php echo $statusClass; ?>"><?php echo $statusText; ?></td>
+              <td><?php echo $detectedTime; ?></td>
+            </tr>
+          <?php endforeach; ?>
+        <?php endif; ?>
+      </tbody>
+    </table>
+    <div class="print-note">Generating PDF...</div>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script>window.print();</script>
+  </body>
+  </html>
+  <?php
+  exit;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -103,7 +380,7 @@ $section = isset($_GET['section']) ? $conn->real_escape_string($_GET['section'])
   .sl-modal{ display:none; position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:200; backdrop-filter: blur(2px); }
   .sl-modal[aria-hidden="false"]{ display:flex; align-items:flex-start; justify-content:center; padding:32px }
   /* make the modal slightly narrower and allow vertical scrolling for long content so footer buttons stay visible */
-  .sl-modal-content{ background:#fff; border-radius:12px; width:820px; max-width:96%; box-shadow:0 18px 50px rgba(10,10,10,0.28); position:relative; padding:14px 16px 16px; overflow:hidden; max-height:80vh }
+  .sl-modal-content{ background:#fff; border-radius:12px; width:820px; max-width:96%; box-shadow:0 18px 50px rgba(10,10,10,0.28); position:relative; padding:14px 16px 16px; overflow:hidden; max-height:90vh }
   .sl-modal-close{ position:absolute; right:12px; top:12px; border:0; background:#fff; color:#b71c1c; font-size:18px; cursor:pointer; width:34px; height:34px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.06) }
   /* layout: left column for avatar, right column for scrollable content */
   .sl-modal-body{ display:grid; grid-template-columns: 280px 1fr; gap:18px; align-items:start }
@@ -116,7 +393,7 @@ $section = isset($_GET['section']) ? $conn->real_escape_string($_GET['section'])
   /* Add-modal title should match the view modal title */
   #addModalTitle{ font-size:20px; margin:4px 0 8px; font-weight:700; color:#222; text-align:center }
   /* allow the right column to scroll when content is tall, keep footer visible */
-  .sl-right .sl-info-wrap{ max-height:calc(80vh - 300px); overflow:auto; padding-right:6px }
+  .sl-right .sl-info-wrap{ max-height:calc(90vh - 300px); overflow:auto; padding-right:6px }
   /* Stack info rows vertically under the title: label above value and align strong like other info */
   .sl-info{ display:grid; grid-template-columns: 1fr; gap:10px; margin-top:6px }
   .sl-info > div{ display:flex; flex-direction:column; gap:6px; padding:6px 0 }
@@ -139,7 +416,7 @@ $section = isset($_GET['section']) ? $conn->real_escape_string($_GET['section'])
   /* Add student modal form grid */
   .add-form-grid{ display:grid; grid-template-columns: 1fr 1fr; gap:10px 12px }
   .add-form-grid .full{ grid-column: 1 / -1 }
-  #addStudentModal .sl-modal-content{ width:820px; max-width:96%; max-height:80vh; overflow:auto }
+  #addStudentModal .sl-modal-content{ width:820px; max-width:96%; max-height:90vh; overflow:auto }
   /* ensure inputs inside add modal have the same look */
   #addStudentModal .sl-info input.sl-input, #addStudentModal .sl-info select.sl-input{ width:100%; border:1px solid #e6e6e6; padding:8px 10px; border-radius:6px }
   /* make upload button inside add modal use same red and style as upload in view modal */
@@ -314,8 +591,11 @@ $section = isset($_GET['section']) ? $conn->real_escape_string($_GET['section'])
                         No avatar in View
                       </div>
                     </div>
-                    <div style="text-align:center;margin-top:10px">
-                      <button id="registerFaceBtn" class="action-btn upload-btn">Register Face</button>
+                    <div style="text-align:center;margin-top:10px;display:flex;flex-direction:column;gap:10px;align-items:center">
+                      <button id="registerFaceBtn" class="action-btn upload-btn" style="width:100%;max-width:200px">Register Face (Camera)</button>
+                      <button id="uploadFaceBtn" class="action-btn upload-btn" style="width:100%;max-width:200px">Upload Face Image</button>
+                      <input type="file" id="uploadFaceInput" accept="image/*" style="display:none" />
+                      <div id="knownFaceUploadStatus" style="font-size:12px;color:#666;margin-top:4px"></div>
                     </div>
                   </div>
             <div class="sl-right">
@@ -341,6 +621,7 @@ $section = isset($_GET['section']) ? $conn->real_escape_string($_GET['section'])
                 </div>
               </div>
               <div class="sl-actions" style="margin-top:6px">
+                <button id="printAttendanceBtn" class="btn btn-cancel" type="button">Print Attendance</button>
                 <button id="cancelInfoBtn" class="btn btn-cancel" style="display:none">Cancel</button>
                 <button id="editInfoBtn" class="btn btn-primary">Edit</button>
                 <button id="saveInfoBtn" class="btn btn-save" style="display:none">Save</button>
@@ -393,12 +674,14 @@ $section = isset($_GET['section']) ? $conn->real_escape_string($_GET['section'])
   </div>
 
 </div>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', ()=>{
   const modal = document.getElementById('studentModal');
   const modalClose = document.getElementById('modalClose');
   const editBtn = document.getElementById('editInfoBtn');
   const saveBtn = document.getElementById('saveInfoBtn');
+  const printAttendanceBtn = document.getElementById('printAttendanceBtn');
   // Track which student's View modal initiated the face registration
   let faceCurrentRow = null;
 
@@ -423,6 +706,95 @@ document.addEventListener('DOMContentLoaded', ()=>{
     document.getElementById('modalGuardian').value = data.guardian || '';
   document.getElementById('modalPhone').value = data.phone || '';
   document.getElementById('modalGuardianEmail').value = data.guardianEmail || '';
+  if (printAttendanceBtn) {
+    printAttendanceBtn.onclick = async () => {
+      const row = modal._row;
+      const studentDbId = row ? (row.getAttribute('data-student-db-id') || row.dataset.studentDbId || '') : '';
+      if (!studentDbId) { alert('Missing student id'); return; }
+      const dateParam = new Date().toISOString().split('T')[0];
+      try {
+        const res = await fetch(`students_list.php?print_attendance_json=1&student_db_id=${encodeURIComponent(studentDbId)}&date=${encodeURIComponent(dateParam)}`);
+        const data = await res.json();
+        if (!data || !data.ok) {
+          alert(data && data.error ? data.error : 'Failed to generate PDF');
+          return;
+        }
+
+        const { jsPDF } = window.jspdf || {};
+        if (!jsPDF) { alert('PDF library not loaded'); return; }
+
+        const doc = new jsPDF('p', 'pt', 'a4');
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const margin = 40;
+        let y = 40;
+
+        const title = 'Attendance Record (Scheduled Subjects)';
+        doc.setFontSize(14);
+        doc.text(title, margin, y);
+        y += 18;
+
+        doc.setFontSize(11);
+        doc.text(`Student: ${data.student.full_name} (${data.student.student_id})`, margin, y);
+        y += 16;
+        doc.text(`Grade/Section: ${data.student.year_level} / ${data.student.section}`, margin, y);
+        y += 16;
+        const dateLabel = new Date(data.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+        doc.text(`Date: ${dateLabel} (${data.day_name})`, margin, y);
+        y += 20;
+
+        const colX = {
+          subject: margin,
+          timeIn: margin + 220,
+          timeOut: margin + 300,
+          status: margin + 380,
+          detected: margin + 460
+        };
+
+        doc.setFontSize(10);
+        doc.text('Subject', colX.subject, y);
+        doc.text('Time In', colX.timeIn, y);
+        doc.text('Time Out', colX.timeOut, y);
+        doc.text('Status', colX.status, y);
+        doc.text('Detected', colX.detected, y);
+        y += 12;
+
+        const truncate = (str, max) => (str && str.length > max ? str.slice(0, max - 1) + '…' : (str || ''));
+        const formatTime = (t) => {
+          if (!t) return '-';
+          const dt = new Date('2000-01-01 ' + t);
+          if (isNaN(dt.getTime())) return t;
+          return dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        };
+
+        const rows = data.rows || [];
+        if (rows.length === 0) {
+          doc.text('No scheduled subjects for this day.', margin, y + 10);
+        } else {
+          rows.forEach((r) => {
+            if (y > pageHeight - 60) {
+              doc.addPage();
+              y = 40;
+            }
+            const subject = truncate(r.subject, 34);
+            doc.text(subject, colX.subject, y);
+            doc.text(formatTime(r.time_in), colX.timeIn, y);
+            doc.text(formatTime(r.time_out), colX.timeOut, y);
+            doc.text(r.status || '-', colX.status, y);
+            doc.text(formatTime(r.detected_time), colX.detected, y);
+            y += 14;
+          });
+        }
+
+        const safeName = (data.student.full_name || 'student').replace(/[^a-z0-9]+/gi, '_');
+        const filename = `attendance_${safeName}_${data.date}.pdf`;
+        doc.save(filename);
+      } catch (err) {
+        console.error(err);
+        alert('Failed to generate PDF');
+      }
+    };
+  }
   // Avoid setting invalid placeholder dates like 0000-00-00 on type="date"
   (function(){
     const bd = (data && data.birthdate) ? String(data.birthdate) : '';
@@ -638,7 +1010,63 @@ document.addEventListener('DOMContentLoaded', ()=>{
     });
   });
 
-  // View modal does not support direct photo upload; upload flow exists only in Add modal
+  // View modal: known face upload status
+  const knownStatus = document.getElementById('knownFaceUploadStatus');
+  const uploadFaceBtn = document.getElementById('uploadFaceBtn');
+  const uploadFaceInput = document.getElementById('uploadFaceInput');
+  
+  if (uploadFaceBtn && uploadFaceInput) {
+    uploadFaceBtn.addEventListener('click', () => {
+      uploadFaceInput.click();
+    });
+
+    uploadFaceInput.addEventListener('change', async () => {
+      const file = uploadFaceInput.files && uploadFaceInput.files[0];
+      if (!file) return;
+
+      let sid = '';
+      let fullname = '';
+      if (modal._row) {
+        sid = modal._row.getAttribute('data-student-db-id') || modal._row.dataset.studentDbId || '';
+        fullname = modal._row.dataset.name || document.getElementById('modalFullName').value;
+      }
+      const studentIdStr = document.getElementById('modalStudentId').textContent.trim();
+
+      if (!sid && !studentIdStr) {
+        alert('Cannot upload: Student ID not found.');
+        uploadFaceInput.value = '';
+        return;
+      }
+
+      uploadFaceBtn.disabled = true;
+      uploadFaceBtn.textContent = 'Uploading...';
+      if (knownStatus) knownStatus.textContent = 'Uploading image...';
+
+      const fd = new FormData();
+      fd.append('photo', file);
+      fd.append('student_db_id', sid);
+      fd.append('student_id_str', studentIdStr);
+      fd.append('full_name', fullname);
+
+      try {
+        const res = await fetch('../crud/upload_known_face.php', { method: 'POST', body: fd });
+        const json = await res.json();
+        if (json && json.success) {
+          if (knownStatus) knownStatus.textContent = 'Image uploaded!';
+          setTimeout(() => { if (knownStatus) knownStatus.textContent = ''; }, 2000);
+        } else {
+          if (knownStatus) knownStatus.textContent = json && json.message ? json.message : 'Upload failed';
+        }
+      } catch (err) {
+        console.error(err);
+        if (knownStatus) knownStatus.textContent = 'Network error';
+      } finally {
+        uploadFaceBtn.disabled = false;
+        uploadFaceBtn.textContent = 'Upload Face Image';
+        uploadFaceInput.value = '';
+      }
+    });
+  }
 
   /* Add Student modal handlers */
   const addBtn = document.getElementById('addStudentBtn');

@@ -1,9 +1,18 @@
 <?php
-// Database configuration
-$host = "localhost";
-$user = "root";          // default MySQL username in XAMPP
-$pass = "";              // default MySQL password is empty
-$dbname = "attendance_db";
+// Database configuration - supports both local XAMPP and Render.com deployment
+if (getenv('RENDER') === 'true' || !empty(getenv('DB_HOST'))) {
+    // Render.com or cloud environment
+    $host = getenv('DB_HOST');
+    $user = getenv('DB_USER');
+    $pass = getenv('DB_PASSWORD');
+    $dbname = getenv('DB_NAME') ?: 'attendance_monitoring';
+} else {
+    // Local XAMPP environment
+    $host = "localhost";
+    $user = "root";          // default MySQL username in XAMPP
+    $pass = "";              // default MySQL password is empty
+    $dbname = "attendance_db";
+}
 
 // Create connection
 $conn = new mysqli($host, $user, $pass, $dbname);

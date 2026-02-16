@@ -37,13 +37,13 @@ if ($year && $section) {
   $section_raw = $section;
   $section_for_save = $section_name;
 
-  // Fetch schedule (time_in/time_out) for this grade/section, prioritizing matching day & section
+  // Fetch schedule (time_in/time_out) for this grade/section - ONLY for today's day_of_week
   $scheduleTimeIn = '-';
   $scheduleTimeOut = '-';
   $today = date('l');
 
-  // Try exact section + day match first
-  if ($stmt = $conn->prepare("SELECT time_in, time_out FROM curriculum WHERE (grade_level = ? OR grade_level = ?) AND (section = ? OR section = ?) AND (day_of_week = ? OR day_of_week = '' OR day_of_week IS NULL) ORDER BY id DESC LIMIT 1")) {
+  // Try exact section + day match first (STRICT: day must match exactly)
+  if ($stmt = $conn->prepare("SELECT time_in, time_out FROM curriculum WHERE (grade_level = ? OR grade_level = ?) AND (section = ? OR section = ?) AND day_of_week = ? ORDER BY id DESC LIMIT 1")) {
     $stmt->bind_param('sssss', $year_level, $year, $section_name, $section_raw, $today);
     $stmt->execute();
     $res = $stmt->get_result();
@@ -54,8 +54,8 @@ if ($year && $section) {
     $stmt->close();
   }
 
-  // Fallback: any schedule for grade (no section restriction)
-  if ($scheduleTimeIn === '-' && $stmt = $conn->prepare("SELECT time_in, time_out FROM curriculum WHERE (grade_level = ? OR grade_level = ?) AND (day_of_week = ? OR day_of_week = '' OR day_of_week IS NULL) ORDER BY id DESC LIMIT 1")) {
+  // Fallback: any schedule for grade matching today's day (STRICT: no empty/null day matching)
+  if ($scheduleTimeIn === '-' && $stmt = $conn->prepare("SELECT time_in, time_out FROM curriculum WHERE (grade_level = ? OR grade_level = ?) AND day_of_week = ? ORDER BY id DESC LIMIT 1")) {
     $stmt->bind_param('sss', $year_level, $year, $today);
     $stmt->execute();
     $res = $stmt->get_result();
@@ -66,13 +66,27 @@ if ($year && $section) {
     $stmt->close();
   }
 
-  // Query students
+  // Query students - fetch by section match first
   if ($stmt = $conn->prepare("SELECT id, student_id, full_name, section FROM students WHERE year_level = ? AND (section = ? OR section = ?) ORDER BY full_name")) {
     $stmt->bind_param('sss', $year_level, $section_name, $section_raw);
     $stmt->execute();
     $result = $stmt->get_result();
     while ($row = $result->fetch_assoc()) {
       if (!empty($row['section'])) {
+        $section_for_save = $row['section'];
+      }
+      $students[] = $row;
+    }
+    $stmt->close();
+  }
+
+  // Fallback: if no students found by section name, fetch ALL students for this year level
+  if (empty($students) && $stmt = $conn->prepare("SELECT id, student_id, full_name, section FROM students WHERE year_level = ? ORDER BY full_name")) {
+    $stmt->bind_param('s', $year_level);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    while ($row = $result->fetch_assoc()) {
+      if (!empty($row['section']) && empty($section_for_save)) {
         $section_for_save = $row['section'];
       }
       $students[] = $row;
@@ -112,6 +126,11 @@ if ($year && $section) {
     #class-log th:nth-child(4), #class-log td:nth-child(4),
     #class-log th:nth-child(5), #class-log td:nth-child(5) { width: 120px; text-align: center; }
     #class-log th:nth-child(6), #class-log td:nth-child(6) { width: auto; text-align: left; }
+    #class-log th:nth-child(7), #class-log td:nth-child(7) { width: 220px; text-align: left; }
+    .verify-wrap { display:flex; gap:6px; align-items:center; }
+    .verify-select { padding:4px 6px; border:1px solid #ddd; border-radius:6px; font-size:12px; min-width:120px; }
+    .verify-btn { padding:4px 8px; border:0; border-radius:6px; background:#1976d2; color:#fff; font-size:12px; cursor:pointer; }
+    .verify-btn:disabled { background:#9bbbdc; cursor:not-allowed; }
     .admin-info { font-weight: bold; }
     .camera-wrapper { display: block; gap: 20px; margin-top: 20px; }
     .video-section {
@@ -226,7 +245,7 @@ if ($year && $section) {
       </div>
   <div id="class-log-scroll" style="overflow:auto;max-height:220px;margin-top:8px;padding-bottom:0">
         <table id="class-log" style="width:100%;border-collapse:collapse;font-size:14px">
-          <thead style="background:#f7f7f7"><tr><th style="padding:8px;border-bottom:1px solid #eee">Student ID</th><th style="padding:8px;border-bottom:1px solid #eee">Name</th><th style="padding:8px;border-bottom:1px solid #eee">Status</th><th style="padding:8px;border-bottom:1px solid #eee">Time-In</th><th style="padding:8px;border-bottom:1px solid #eee">Time-Out</th><th style="padding:8px;border-bottom:1px solid #eee">Remarks</th></tr></thead>
+          <thead style="background:#f7f7f7"><tr><th style="padding:8px;border-bottom:1px solid #eee">Student ID</th><th style="padding:8px;border-bottom:1px solid #eee">Name</th><th style="padding:8px;border-bottom:1px solid #eee">Status</th><th style="padding:8px;border-bottom:1px solid #eee">Time-In</th><th style="padding:8px;border-bottom:1px solid #eee">Time-Out</th><th style="padding:8px;border-bottom:1px solid #eee">Remarks</th><th style="padding:8px;border-bottom:1px solid #eee">Verify</th></tr></thead>
           <tbody>
             <?php if (!empty($students)): ?>
               <?php foreach ($students as $student): ?>
@@ -237,6 +256,17 @@ if ($year && $section) {
                   <td class="time-in" style="padding:8px;border-bottom:1px solid #eee">-</td>
                   <td class="time-out" style="padding:8px;border-bottom:1px solid #eee">-</td>
                   <td style="padding:8px;border-bottom:1px solid #eee">Not yet detected</td>
+                  <td style="padding:8px;border-bottom:1px solid #eee">
+                    <div class="verify-wrap">
+                      <select class="verify-select">
+                        <option value="">Select correct</option>
+                        <?php foreach ($students as $opt): ?>
+                          <option value="<?php echo htmlspecialchars($opt['id']); ?>"><?php echo htmlspecialchars($opt['full_name']); ?></option>
+                        <?php endforeach; ?>
+                      </select>
+                      <button class="verify-btn" type="button" disabled>Save</button>
+                    </div>
+                  </td>
                 </tr>
               <?php endforeach; ?>
             <?php else: ?>
@@ -312,15 +342,205 @@ if ($year && $section) {
       if (!key) return null;
       return STUDENT_MAP[key] || null;
     }
+
+    // Persistent class log storage (localStorage) - reset is driven by schedule end time
+    const SECTION_NAME_STORAGE = <?php echo json_encode($section_for_save ?? ($section_name ?? '')); ?>;
+    const CLASS_LOG_RESET_HOUR = 22; // 10pm
+    const SCHEDULE_TIME_IN_VALUE = <?php echo json_encode($scheduleTimeIn ?? ''); ?>;
+    const SCHEDULE_TIME_OUT_VALUE = <?php echo json_encode($scheduleTimeOut ?? ''); ?>;
+    
+    // Determine if there's a schedule window and if current time is within it
+    function isWithinScheduleWindow() {
+      if (!SCHEDULE_TIME_IN_VALUE || SCHEDULE_TIME_IN_VALUE === '-' || 
+          !SCHEDULE_TIME_OUT_VALUE || SCHEDULE_TIME_OUT_VALUE === '-') {
+        return false;
+      }
+      
+      const now = new Date();
+      const scheduleStart = parseScheduleTimeToday(SCHEDULE_TIME_IN_VALUE);
+      const scheduleEnd = parseScheduleTimeToday(SCHEDULE_TIME_OUT_VALUE);
+      
+      if (!scheduleStart || !scheduleEnd) return false;
+      
+      // Check if current time is within the schedule window
+      return now >= scheduleStart && now <= scheduleEnd;
+    }
+
+    const hasScheduleWindow = !!(SCHEDULE_TIME_IN_VALUE && SCHEDULE_TIME_IN_VALUE !== '-' && 
+                                  SCHEDULE_TIME_OUT_VALUE && SCHEDULE_TIME_OUT_VALUE !== '-');
+
+    function getClassLogDateKey() {
+      const now = new Date();
+      const dateKey = new Date(now);
+      if (now.getHours() >= CLASS_LOG_RESET_HOUR) {
+        dateKey.setDate(dateKey.getDate() + 1);
+      }
+      return dateKey.toISOString().split('T')[0];
+    }
+
+    // Keep a stable key per section/day so logs persist until schedule end clears them
+    const CLASS_LOG_STORAGE_KEY = 'classlog_' + SECTION_NAME_STORAGE + '_' + getClassLogDateKey();
+
+    // Load persisted class log data from localStorage
+    function loadPersistedClassLog() {
+      try {
+        const stored = localStorage.getItem(CLASS_LOG_STORAGE_KEY);
+        if (stored) {
+          return JSON.parse(stored);
+        }
+      } catch (e) {
+        console.warn('Failed to load persisted class log', e);
+      }
+      return {};
+    }
+
+    // Save class log data to localStorage
+    function persistClassLog(attendanceData) {
+      try {
+        localStorage.setItem(CLASS_LOG_STORAGE_KEY, JSON.stringify(attendanceData));
+      } catch (e) {
+        console.warn('Failed to persist class log', e);
+      }
+    }
+
+    // Clear class log storage and UI at 10pm daily
+    function resetClassLogUI() {
+      const rows = document.querySelectorAll('#class-log tbody tr[data-student-db-id]');
+      rows.forEach(row => {
+        const statusCell = row.querySelector('td:nth-child(3)');
+        const timeInCell = row.querySelector('.time-in');
+        const timeOutCell = row.querySelector('.time-out');
+        const remarksCell = row.querySelector('td:nth-child(6)');
+        if (statusCell) { statusCell.textContent = 'Absent'; statusCell.style.color = '#999'; }
+        if (timeInCell) timeInCell.textContent = '-';
+        if (timeOutCell) timeOutCell.textContent = '-';
+        if (remarksCell) remarksCell.textContent = 'Not yet detected';
+      });
+    }
+
+    // Clear class log UI when no schedule exists for the day
+    function resetClassLogUIEmpty() {
+      const rows = document.querySelectorAll('#class-log tbody tr[data-student-db-id]');
+      rows.forEach(row => {
+        const statusCell = row.querySelector('td:nth-child(3)');
+        const timeInCell = row.querySelector('.time-in');
+        const timeOutCell = row.querySelector('.time-out');
+        const remarksCell = row.querySelector('td:nth-child(6)');
+        if (statusCell) { statusCell.textContent = '-'; statusCell.style.color = '#999'; }
+        if (timeInCell) timeInCell.textContent = '-';
+        if (timeOutCell) timeOutCell.textContent = '-';
+        if (remarksCell) remarksCell.textContent = '-';
+      });
+    }
+
+    function scheduleDailyReset() {
+      const now = new Date();
+      const resetTime = new Date(now);
+      resetTime.setHours(CLASS_LOG_RESET_HOUR, 0, 0, 0);
+      if (now >= resetTime) {
+        resetTime.setDate(resetTime.getDate() + 1);
+      }
+      const msUntilReset = resetTime.getTime() - now.getTime();
+      setTimeout(() => {
+        try { localStorage.removeItem(CLASS_LOG_STORAGE_KEY); } catch (e) {}
+        persistedAttendance = {};
+        resetClassLogUI();
+        scheduleDailyReset();
+      }, msUntilReset);
+    }
+
+    function scheduleSubjectReset(scheduleEndTime) {
+      if (!scheduleEndTime) return;
+      
+      const now = new Date();
+      const msUntilReset = scheduleEndTime.getTime() - now.getTime();
+      
+      if (msUntilReset > 0) {
+        setTimeout(() => {
+          // Clear class log when subject ends
+          try { localStorage.removeItem(CLASS_LOG_STORAGE_KEY); } catch (e) {}
+          persistedAttendance = {};
+          Object.keys(firstSeenMap).forEach(k => delete firstSeenMap[k]);
+          Object.keys(lastSeenMap).forEach(k => delete lastSeenMap[k]);
+          Object.keys(statusMap).forEach(k => delete statusMap[k]);
+          Object.keys(confirmCounts).forEach(k => delete confirmCounts[k]);
+          resetClassLogUI();
+          console.log('Class log reset at subject end time');
+        }, msUntilReset);
+      }
+    }
+
+    function resetClassLogForSubject() {
+      persistedAttendance = {};
+      try { localStorage.removeItem(CLASS_LOG_STORAGE_KEY); } catch (e) {}
+      Object.keys(firstSeenMap).forEach(k => delete firstSeenMap[k]);
+      Object.keys(lastSeenMap).forEach(k => delete lastSeenMap[k]);
+      Object.keys(statusMap).forEach(k => delete statusMap[k]);
+      Object.keys(confirmCounts).forEach(k => delete confirmCounts[k]);
+      resetClassLogUI();
+    }
+
+    // Global store for persisted attendance (updated from localStorage on load)
+    let persistedAttendance = loadPersistedClassLog();
+
+    function persistAttendanceForStudent(studentDbId, updates) {
+      // Only persist if current time is within the schedule window
+      if (!studentDbId || !isWithinScheduleWindow()) return;
+      const key = String(studentDbId);
+      const existing = persistedAttendance[key] || {};
+      persistedAttendance[key] = Object.assign({}, existing, updates);
+      persistClassLog(persistedAttendance);
+    }
+
+    // first detection timestamps per student (to fix Time-In)
+    const firstSeenMap = {};
+    // last detection timestamp for Time-Out on leave
+    const lastSeenMap = {};
+    // status per student (Present or Late) to avoid flipping
+    const statusMap = {};
+
+    function applyPersistedRow(row, data) {
+      if (!row || !data) return;
+      const statusCell = row.querySelector('td:nth-child(3)');
+      const timeInCell = row.querySelector('.time-in');
+      const timeOutCell = row.querySelector('.time-out');
+      const remarksCell = row.querySelector('td:nth-child(6)');
+      if (statusCell && data.status) {
+        statusCell.textContent = data.status;
+        statusCell.style.color = data.status === 'Late' ? '#d97706' : (data.status === 'Present' ? 'green' : '#999');
+      }
+      if (timeInCell && data.time_in) timeInCell.textContent = data.time_in;
+      if (timeOutCell && data.time_out) timeOutCell.textContent = data.time_out;
+      if (remarksCell && data.remarks) remarksCell.textContent = data.remarks;
+    }
+
+    function applyPersistedClassLog() {
+      const rows = document.querySelectorAll('#class-log tbody tr[data-student-db-id]');
+      rows.forEach(row => {
+        const studentDbId = row.getAttribute('data-student-db-id');
+        const data = persistedAttendance[String(studentDbId)];
+        if (data) {
+          applyPersistedRow(row, data);
+          if (data.status) statusMap[String(studentDbId)] = data.status;
+          if (data.time_in) firstSeenMap[String(studentDbId)] = Date.now();
+        }
+      });
+    }
   // tracker smoothing state - keyed by recognized student id/label for stability
   let trackerLastBoxes = {}; // key: trackKey, value: {x,y,w,h,alpha,lastSeen,labelText,isUnknown,lookupId}
-  const TRACKER_SMOOTHING = 0.12; // 0..1, lower = more smoothing
-  const TRACKER_MIN_ALPHA = 0.12;
-  const TRACKER_HOLD_MS = 500; // keep last box briefly when detection drops
-  const MIN_CONFIDENCE_THRESHOLD = 0.3; // minimum confidence to track a face
+  const TRACKER_SMOOTHING = 0.45; // 0..1, higher = faster tracking
+  const TRACKER_MIN_ALPHA = 0.4;
+  const TRACKER_HOLD_MS = 180; // keep last box briefly when detection drops
+  const MIN_CONFIDENCE_THRESHOLD = 0.25; // minimum confidence to track a face (more permissive)
   // global matcher and labeled count so we can refresh descriptors without reload
   let globalFaceMatcher = null;
   let globalLabeledCount = 0;
+  let detectorOptions = null;
+  let descriptorDetectorOptions = null;
+  let detectionWidth = 640;
+  let activeDetector = 'ssd';
+  const confirmCounts = {};
+  const CONFIRM_FRAMES = 1; // immediate confirmation
 
     function simulateFaceTracking() {
       trackingInterval = setInterval(() => {
@@ -425,6 +645,39 @@ if ($year && $section) {
     function setStatus(text, color) {
       statusEl.textContent = text;
       statusEl.style.background = color || 'rgba(0,0,0,0.6)';
+    }
+
+    function getTodayIso() {
+      const d = new Date();
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+
+    async function saveVerification(predictedId, actualId) {
+      try {
+        const res = await fetch('/attendance-monitoring/crud/save_recognition_log.php', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            predicted_id: predictedId,
+            actual_id: actualId,
+            section: SECTION_NAME,
+            date: getTodayIso()
+          })
+        });
+        const j = await res.json();
+        if (!(j && j.success)) {
+          const msg = j && j.message ? j.message : 'Unknown error';
+          console.warn('Verification save failed:', msg);
+          return false;
+        }
+        return true;
+      } catch (e) {
+        console.warn('Failed to save verification', e);
+        return false;
+      }
     }
 
     function resizeOverlayToVideo() {
@@ -630,12 +883,19 @@ if ($year && $section) {
     setInterval(checkStreamStatus, 2500);
 
 
-    Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri('/attendance-monitoring/models'),
-      faceapi.nets.faceLandmark68Net.loadFromUri('/attendance-monitoring/models'),
-      faceapi.nets.faceRecognitionNet.loadFromUri('/attendance-monitoring/models')
-    ]).then(startCamera)
-    ;
+    async function loadModels() {
+      await faceapi.nets.tinyFaceDetector.loadFromUri('/attendance-monitoring/models');
+      detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 704, scoreThreshold: 0.25 });
+      descriptorDetectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 704, scoreThreshold: 0.25 });
+      detectionWidth = 704;
+      activeDetector = 'tiny';
+
+      await faceapi.nets.faceLandmark68Net.loadFromUri('/attendance-monitoring/models');
+      await faceapi.nets.faceRecognitionNet.loadFromUri('/attendance-monitoring/models');
+    }
+
+    const modelsReadyPromise = loadModels();
+    modelsReadyPromise.then(startCamera);
 
     // Do not prefill time-in/out for undetected students.
 
@@ -675,7 +935,7 @@ if ($year && $section) {
           for (const url of imgs) {
             try {
               const img = await faceapi.fetchImage(url);
-              const detection = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
+              const detection = await faceapi.detectSingleFace(img, descriptorDetectorOptions).withFaceLandmarks().withFaceDescriptor();
               if (detection && detection.descriptor) descriptors.push(detection.descriptor);
             } catch (e) {
               console.warn('Failed to load/encode', url, e);
@@ -698,7 +958,7 @@ if ($year && $section) {
         const labeled = await loadLabeledDescriptors();
         globalLabeledCount = labeled.length;
         if (labeled.length > 0) {
-          globalFaceMatcher = new faceapi.FaceMatcher(labeled, 0.6);
+          globalFaceMatcher = new faceapi.FaceMatcher(labeled, 0.5);
           console.log('Global descriptors loaded:', globalLabeledCount);
         } else {
           globalFaceMatcher = null;
@@ -708,6 +968,7 @@ if ($year && $section) {
       }
 
     async function startRecognition() {
+      await modelsReadyPromise;
       const overlay = document.getElementById('overlay');
       const video = document.getElementById('liveVideo');
       window.addEventListener('resize', resizeOverlayToVideo);
@@ -732,14 +993,19 @@ if ($year && $section) {
   const faceCropCtx = null;
   // cache student info fetched from server by student_id (label)
   const studentInfoCache = {};
-  // first detection timestamps per student (to fix Time-In)
-  const firstSeenMap = {};
-  // last detection timestamp for Time-Out on leave
-  const lastSeenMap = {};
-  // status per student (Present or Late) to avoid flipping
-  const statusMap = {};
   const scheduleStart = parseScheduleTimeToday(SCHEDULE_TIME_IN);
-  const lateCutoff = scheduleStart ? new Date(scheduleStart.getTime() + (15 * 60 * 1000)) : null;
+  const scheduleEnd = parseScheduleTimeToday(SCHEDULE_TIME_OUT);
+  const lateCutoff = scheduleStart ? new Date(scheduleStart.getTime() + (25 * 60 * 1000)) : null;
+  // hasScheduleWindow already declared at top level - use that instead
+  // Always load persisted data regardless of schedule status
+  if (hasScheduleWindow) {
+    applyPersistedClassLog();
+    scheduleDailyReset();
+    scheduleSubjectReset(scheduleEnd); // Reset class log when subject ends
+  } else {
+    // Even without active schedule, load any persisted data from previous session
+    applyPersistedClassLog();
+  }
   // set of labels seen in previous loop
   let prevSeenLabels = new Set();
   async function fetchStudentInfo(studentId) {
@@ -769,9 +1035,6 @@ if ($year && $section) {
       if (diagEl) diagEl.textContent = `Matcher:${globalFaceMatcher? 'yes':'no'} | labeled:${globalLabeledCount} | det:0 | best:0.00`;
 
       const classLog = document.getElementById('class-log');
-      // Tunable detector options: inputSize must be divisible by 32 for TinyFaceDetector
-      // Balanced accuracy: slightly higher inputSize with lower threshold
-      const detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.1 });
 
       function drawTrackedBox(tracker, labelText, isUnknown) {
         if (!tracker) return;
@@ -815,25 +1078,76 @@ if ($year && $section) {
       }
 
       let detectBusy = false;
+      let subjectResetDone = false;
       async function detectLoop() {
-        if (detectBusy) { setTimeout(detectLoop, 50); return; }
-        if (video.paused || video.ended) {
-          setTimeout(detectLoop, 200);
+        // Only process NEW detections if current time is within the schedule window
+        // But keep showing existing tracked boxes even outside schedule
+        const withinSchedule = isWithinScheduleWindow();
+        
+        if (!withinSchedule) {
+          // Outside schedule: just render existing tracked boxes, don't detect new faces
+          ctx.clearRect(0, 0, overlay.width, overlay.height);
+          const now = Date.now();
+          for (const trackKey in trackerLastBoxes) {
+            const tracker = trackerLastBoxes[trackKey];
+            if (now - tracker.lastSeen < TRACKER_HOLD_MS) {
+              drawTrackedBox(tracker, tracker.labelText, tracker.isUnknown);
+            }
+          }
+          requestAnimationFrame(detectLoop);
           return;
         }
+        if (detectBusy) { setTimeout(detectLoop, 20); return; }
+        if (video.paused || video.ended) {
+          setTimeout(detectLoop, 120);
+          return;
+        }
+
+        if (!hasScheduleWindow) {
+          detectBusy = false;
+          setTimeout(detectLoop, 120);
+          return;
+        }
+
+        // Auto-set time-out for all students with time-in when scheduled end time is reached
+        if (scheduleEnd && Date.now() >= scheduleEnd.getTime()) {
+          const classLog = document.getElementById('class-log');
+          if (classLog) {
+            const rows = classLog.querySelectorAll('tbody tr[data-student-db-id]');
+            rows.forEach(row => {
+              const studentDbId = parseInt(row.getAttribute('data-student-db-id'), 10);
+              const lookupId = String(studentDbId);
+              const timeOutEl = row.querySelector('.time-out');
+              // Only set time-out if student has time-in and time-out is still empty
+              if (firstSeenMap[lookupId] && timeOutEl && timeOutEl.textContent === '-') {
+                const timeOutText = scheduleEnd.toLocaleTimeString();
+                timeOutEl.textContent = timeOutText;
+                // Persist the auto time-out
+                const status = statusMap[lookupId] || 'Present';
+                saveAttendanceUpdate(studentDbId, { status, timeOutTs: scheduleEnd.getTime() });
+                persistAttendanceForStudent(studentDbId, { time_out: timeOutText, remarks: 'Left' });
+              }
+            });
+          }
+          if (!subjectResetDone) {
+            subjectResetDone = true;
+            resetClassLogForSubject();
+          }
+        }
+
         detectBusy = true;
         // Downscale frame before detection to reduce CPU
         // Slightly higher resolution feed to improve distance detection
         if (!video.videoWidth || !video.videoHeight) {
           detectBusy = false;
-          setTimeout(detectLoop, 150);
+          setTimeout(detectLoop, 80);
           return;
         }
-        const detW = 480;
+        const detW = detectionWidth;
         const detH = Math.max(1, Math.round(video.videoHeight / video.videoWidth * detW));
         if (detW <= 0 || detH <= 0) {
           detectBusy = false;
-          setTimeout(detectLoop, 150);
+          setTimeout(detectLoop, 80);
           return;
         }
         detectionCanvas.width = detW;
@@ -848,6 +1162,7 @@ if ($year && $section) {
         // Process ALL detections - track and display each one
         const processedLabels = new Set();
         const currentTrackKeys = new Set();
+        const matchedKeys = new Set();
 
         const meta = [];
         for (let i = 0; i < detections.length; i++) {
@@ -864,18 +1179,27 @@ if ($year && $section) {
 
           if (globalFaceMatcher && det.descriptor) {
             const match = globalFaceMatcher.findBestMatch(det.descriptor);
-            if (match && match.label && match.label !== 'unknown' && match.distance < 0.6) {
-              label = match.label;
-              matchInfo = match;
-              isUnknown = false;
-              try {
-                stuObj = await fetchStudentInfo(label);
-                if (stuObj) {
-                  displayName = stuObj.full_name || stuObj.student_id || label;
-                  studentDbId = stuObj.id || null;
+            if (match && match.label && match.label !== 'unknown' && match.distance < 0.5) {
+              const key = match.label;
+              matchedKeys.add(key);
+              confirmCounts[key] = (confirmCounts[key] || 0) + 1;
+              const confirmed = confirmCounts[key] >= CONFIRM_FRAMES;
+              if (confirmed) {
+                label = match.label;
+                matchInfo = match;
+                isUnknown = false;
+                try {
+                  stuObj = await fetchStudentInfo(label);
+                  if (stuObj) {
+                    displayName = stuObj.full_name || stuObj.student_id || label;
+                    studentDbId = stuObj.id || null;
+                  }
+                } catch (e) {
+                  console.warn('Failed to fetch student info for', label, e);
                 }
-              } catch (e) {
-                console.warn('Failed to fetch student info for', label, e);
+              } else {
+                displayName = 'Verifying...';
+                isUnknown = true;
               }
             }
           }
@@ -980,8 +1304,8 @@ if ($year && $section) {
 
           drawTrackedBox(tracker, tracker.labelText, tracker.isUnknown);
           
-          // Update class log for recognized students in this section
-          if (!isUnknown) {
+          // Update class log for recognized students in this section (only if schedule exists)
+          if (!isUnknown && hasScheduleWindow) {
             const lookupId = studentDbId ? String(studentDbId) : String(label);
             const existing = classLog.querySelector('tbody tr[data-student-db-id="' + lookupId + '"]');
             
@@ -991,12 +1315,22 @@ if ($year && $section) {
               if (!firstSeenMap[lookupId]) {
                 firstSeenMap[lookupId] = Date.now();
                 const timeInEl = existing.querySelector('.time-in');
-                if (timeInEl) timeInEl.textContent = new Date(firstSeenMap[lookupId]).toLocaleTimeString();
-                const isLate = !!(lateCutoff && firstSeenMap[lookupId] > lateCutoff.getTime());
+                const timeInText = new Date(firstSeenMap[lookupId]).toLocaleTimeString();
+                if (timeInEl) timeInEl.textContent = timeInText;
+                const firstSeenTs = firstSeenMap[lookupId];
+                const withinSchedule = !!(scheduleStart && scheduleEnd && firstSeenTs >= scheduleStart.getTime() && firstSeenTs <= scheduleEnd.getTime());
+                const isLate = !!(withinSchedule && lateCutoff && firstSeenTs > lateCutoff.getTime());
                 const status = isLate ? 'Late' : 'Present';
                 statusMap[lookupId] = status;
                 // Persist attendance with time-in when first captured
                 if (studentDbId) saveAttendanceUpdate(studentDbId, { status, timeInTs: firstSeenMap[lookupId] });
+                if (studentDbId) {
+                  persistAttendanceForStudent(studentDbId, {
+                    status,
+                    time_in: timeInText,
+                    remarks: status === 'Late' ? 'Late' : 'Detected'
+                  });
+                }
               }
               // Track last seen time for Time-Out updates when leaving
               lastSeenMap[lookupId] = Date.now();
@@ -1011,26 +1345,65 @@ if ($year && $section) {
                 const currentStatus = statusMap[lookupId] || 'Present';
                 remarksCell.textContent = currentStatus === 'Late' ? 'Late' : 'Detected';
               }
+              if (studentDbId) {
+                const currentStatus = statusMap[lookupId] || 'Present';
+                persistAttendanceForStudent(studentDbId, {
+                  status: currentStatus,
+                  remarks: currentStatus === 'Late' ? 'Late' : 'Detected'
+                });
+              }
+
+              const verifySelect = existing.querySelector('.verify-select');
+              const verifyBtn = existing.querySelector('.verify-btn');
+              if (verifySelect && verifyBtn) {
+                verifySelect.disabled = false;
+                verifyBtn.disabled = false;
+                verifySelect.value = String(studentDbId || '');
+                verifyBtn.dataset.predictedId = String(studentDbId || '');
+              }
             }
             
             processedLabels.add(lookupId);
           }
         }
         
-        // For any previously seen label not in the current frame, set Time-Out to last seen
+        Object.keys(confirmCounts).forEach(key => {
+          if (!matchedKeys.has(key)) confirmCounts[key] = 0;
+        });
+
+        // For any previously seen label not in the current frame, set Time-Out to scheduled end time or last seen
         prevSeenLabels.forEach(id => {
           if (!processedLabels.has(id)) {
             const row = classLog.querySelector('tbody tr[data-student-db-id="' + id + '"]');
             if (row) {
+              // Only set Time-Out if we already have a Time-In for this student
+              const hasTimeIn = !!firstSeenMap[id];
               const timeOutEl = row.querySelector('.time-out');
-              if (timeOutEl) timeOutEl.textContent = new Date(lastSeenMap[id] || Date.now()).toLocaleTimeString();
+              let timeOutText = null;
+              if (hasTimeIn && timeOutEl && timeOutEl.textContent === '-') {
+                // Use scheduled end time if available, otherwise use last seen time
+                let timeOutTs = lastSeenMap[id] || Date.now();
+                if (scheduleEnd) {
+                  timeOutTs = scheduleEnd.getTime();
+                }
+                timeOutText = new Date(timeOutTs).toLocaleTimeString();
+                timeOutEl.textContent = timeOutText;
+              }
               const remarksCell = row.querySelector('td:nth-child(6)');
-              if (remarksCell) remarksCell.textContent = 'Left';
+              if (remarksCell && hasTimeIn && timeOutText) remarksCell.textContent = 'Left';
+              if (remarksCell && !hasTimeIn) remarksCell.textContent = 'Not yet detected';
               // Persist attendance with time-out when student leaves frame
               const studentDbId = parseInt(id, 10);
-              if (!Number.isNaN(studentDbId)) {
-                const ts = lastSeenMap[id] || Date.now();
-                saveAttendanceUpdate(studentDbId, { status: 'Present', timeOutTs: ts });
+              if (hasTimeIn && !Number.isNaN(studentDbId)) {
+                let ts = lastSeenMap[id] || Date.now();
+                if (scheduleEnd) {
+                  ts = scheduleEnd.getTime();
+                }
+                const status = statusMap[id] || 'Present';
+                saveAttendanceUpdate(studentDbId, { status, timeOutTs: ts });
+                if (timeOutText) {
+                  persistAttendanceForStudent(studentDbId, { time_out: timeOutText, remarks: 'Left' });
+                }
               }
             }
           }
@@ -1058,7 +1431,7 @@ if ($year && $section) {
         });
 
         detectBusy = false;
-        setTimeout(detectLoop, 150);
+        setTimeout(detectLoop, 80);
       }
 
       detectLoop();
@@ -1125,6 +1498,38 @@ if ($year && $section) {
     });
 
     // Editing is performed on manattendance.php; camera page now links there for manual edits.
+
+    const classLogBody = document.querySelector('#class-log tbody');
+    if (classLogBody) {
+      classLogBody.addEventListener('change', (e) => {
+        const select = e.target.closest('.verify-select');
+        if (!select) return;
+        const row = select.closest('tr');
+        if (!row) return;
+        const btn = row.querySelector('.verify-btn');
+        if (btn) btn.disabled = !select.value;
+      });
+
+      classLogBody.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.verify-btn');
+        if (!btn) return;
+        const row = btn.closest('tr');
+        if (!row) return;
+        const select = row.querySelector('.verify-select');
+        const actualId = select ? select.value : '';
+        const predictedId = btn.dataset.predictedId || row.getAttribute('data-student-db-id') || '';
+        if (!predictedId || !actualId) return alert('Select the correct student first.');
+        btn.disabled = true;
+        const ok = await saveVerification(predictedId, actualId);
+        if (!ok) {
+          btn.disabled = false;
+          alert('Failed to save verification.');
+          return;
+        }
+        row.dataset.verified = '1';
+        btn.textContent = 'Saved';
+      });
+    }
   </script>
 </body>
 </html>

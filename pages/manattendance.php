@@ -466,7 +466,7 @@ $headerYear = $yearLevel !== '' ? htmlspecialchars($yearLevel) : '';
           payloadDel.append('action', 'delete');
           payloadDel.append('section', section);
 
-          fetch('crud/save_manual_attendance.php', { method: 'POST', body: payloadDel })
+          fetch('../crud/save_manual_attendance.php', { method: 'POST', body: payloadDel })
             .then(async r => {
               const text = await r.text();
               try { return JSON.parse(text); } catch (e) {
@@ -500,7 +500,7 @@ $headerYear = $yearLevel !== '' ? htmlspecialchars($yearLevel) : '';
         payload.append('section', section);
         if (teacherId) payload.append('teacher_id', teacherId);
 
-        fetch('crud/save_manual_attendance.php', { method: 'POST', body: payload })
+        fetch('../crud/save_manual_attendance.php', { method: 'POST', body: payload })
           .then(async r => {
             const text = await r.text();
             try { return JSON.parse(text); } catch (e) {

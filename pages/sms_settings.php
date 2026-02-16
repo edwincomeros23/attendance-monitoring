@@ -23,6 +23,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $emailFromAddress = isset($_POST['email_from_address']) ? trim($_POST['email_from_address']) : '';
     $emailFromName = isset($_POST['email_from_name']) ? trim($_POST['email_from_name']) : '';
     $emailAppPassword = isset($_POST['email_app_password']) ? trim($_POST['email_app_password']) : '';
+    $telegramEnabled = isset($_POST['telegram_enabled']) ? 'true' : 'false';
+    $telegramDebugMode = isset($_POST['telegram_debug_mode']) ? 'true' : 'false';
+    $telegramBotToken = isset($_POST['telegram_bot_token']) ? trim($_POST['telegram_bot_token']) : '';
+    $telegramChatId = isset($_POST['telegram_chat_id']) ? trim($_POST['telegram_chat_id']) : '';
     
     $configContent = preg_replace("/define\('SEMAPHORE_API_KEY', '.*?'\);/", "define('SEMAPHORE_API_KEY', '$apiKey');", $configContent);
     $configContent = preg_replace("/define\('SMS_ENABLED', .*?\);/", "define('SMS_ENABLED', $smsEnabled);", $configContent);
@@ -35,6 +39,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $configContent = preg_replace("/define\('EMAIL_FROM_ADDRESS', '.*?'\);/", "define('EMAIL_FROM_ADDRESS', '$emailFromAddress');", $configContent);
     $configContent = preg_replace("/define\('EMAIL_FROM_NAME', '.*?'\);/", "define('EMAIL_FROM_NAME', '$emailFromName');", $configContent);
     $configContent = preg_replace("/define\('EMAIL_APP_PASSWORD', '.*?'\);/", "define('EMAIL_APP_PASSWORD', '$emailAppPassword');", $configContent);
+    $configContent = preg_replace("/define\('TELEGRAM_ENABLED', .*?\);/", "define('TELEGRAM_ENABLED', $telegramEnabled);", $configContent);
+    $configContent = preg_replace("/define\('TELEGRAM_DEBUG_MODE', .*?\);/", "define('TELEGRAM_DEBUG_MODE', $telegramDebugMode);", $configContent);
+    $configContent = preg_replace("/define\('TELEGRAM_BOT_TOKEN', '.*?'\);/", "define('TELEGRAM_BOT_TOKEN', '$telegramBotToken');", $configContent);
+    $configContent = preg_replace("/define\('TELEGRAM_CHAT_ID', '.*?'\);/", "define('TELEGRAM_CHAT_ID', '$telegramChatId');", $configContent);
     
     if (file_put_contents($configFile, $configContent)) {
         $message = '<div class="alert-success"><i class="fas fa-check-circle"></i> Settings saved successfully!</div>';
@@ -384,7 +392,7 @@ $recentResult = $conn->query($recentQuery);
     <div class="main">
         <div class="page-title">
             <h1><i class="fas fa-bell"></i> SMS & Email Notifications</h1>
-            <p>Configure guardian notifications via SMS and Gmail</p>
+            <p>Configure guardian notifications via SMS, Gmail, and Telegram</p>
         </div>
 
         <?php if ($message) echo $message; ?>
@@ -438,6 +446,21 @@ $recentResult = $conn->query($recentQuery);
                     </div>
                 </div>
 
+                <!-- Telegram Section -->
+                <div class="section-header"><i class="fab fa-telegram-plane"></i> Telegram Settings</div>
+                <div class="form-section">
+                    <div class="form-group">
+                        <label for="telegram_bot_token">Bot Token</label>
+                        <input type="text" id="telegram_bot_token" name="telegram_bot_token" value="<?php echo htmlspecialchars(TELEGRAM_BOT_TOKEN); ?>" placeholder="123456:ABCDEF...">
+                        <div class="form-help">Create a bot with @BotFather to get the token.</div>
+                    </div>
+                    <div class="form-group">
+                        <label for="telegram_chat_id">Chat ID</label>
+                        <input type="text" id="telegram_chat_id" name="telegram_chat_id" value="<?php echo htmlspecialchars(TELEGRAM_CHAT_ID); ?>" placeholder="e.g., 123456789 or -100...">
+                        <div class="form-help">Send a message to your bot, then use @userinfobot to get your chat ID.</div>
+                    </div>
+                </div>
+
                 <!-- Feature Toggles -->
                 <div class="section-header"><i class="fas fa-toggle-on"></i> Features</div>
                 <div class="checkbox-grid">
@@ -454,6 +477,14 @@ $recentResult = $conn->query($recentQuery);
                         <label for="email_enabled" class="checkbox-label">
                             <strong>Enable Gmail Notifications</strong>
                             <div class="checkbox-desc">Send emails to guardian email addresses</div>
+                        </label>
+                    </div>
+
+                    <div class="checkbox-item">
+                        <input type="checkbox" id="telegram_enabled" name="telegram_enabled" <?php echo TELEGRAM_ENABLED ? 'checked' : ''; ?>>
+                        <label for="telegram_enabled" class="checkbox-label">
+                            <strong>Enable Telegram Notifications</strong>
+                            <div class="checkbox-desc">Send Telegram messages to a chat</div>
                         </label>
                     </div>
 
@@ -486,6 +517,14 @@ $recentResult = $conn->query($recentQuery);
                         <label for="email_debug_mode" class="checkbox-label">
                             <strong>Email Debug Mode</strong>
                             <div class="checkbox-desc">Log only - no email sent (testing)</div>
+                        </label>
+                    </div>
+
+                    <div class="checkbox-item">
+                        <input type="checkbox" id="telegram_debug_mode" name="telegram_debug_mode" <?php echo TELEGRAM_DEBUG_MODE ? 'checked' : ''; ?>>
+                        <label for="telegram_debug_mode" class="checkbox-label">
+                            <strong>Telegram Debug Mode</strong>
+                            <div class="checkbox-desc">Log only - no Telegram sent (testing)</div>
                         </label>
                     </div>
                 </div>

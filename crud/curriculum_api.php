@@ -34,7 +34,6 @@ try {
             throw new Exception('Invalid action: ' . $action);
     }
 } catch (Exception $e) {
-    http_response_code(500);
     echo json_encode(['success' => false, 'error' => $e->getMessage()]);
 }
 
@@ -111,7 +110,8 @@ function addCurriculum() {
     $room = trim($_POST['room'] ?? '');
     
     if (empty($subject_name) || empty($grade_level)) {
-        throw new Exception('Subject name and grade level are required');
+        echo json_encode(['success' => false, 'error' => 'Subject name and grade level are required']);
+        return;
     }
     
     if (!preg_match('/^Grade\s/', $grade_level)) {
@@ -121,7 +121,8 @@ function addCurriculum() {
     if ($teacher_id && $day_of_week && $time_in && $time_out) {
         $conflict = checkConflictInternal($teacher_id, $day_of_week, $time_in, $time_out, null);
         if ($conflict) {
-            throw new Exception(json_encode(['type' => 'conflict', 'data' => $conflict]));
+            echo json_encode(['success' => false, 'conflict' => $conflict]);
+            return;
         }
     }
     
@@ -160,7 +161,8 @@ function updateCurriculum() {
     $room = trim($_POST['room'] ?? '');
     
     if (empty($subject_name) || empty($grade_level)) {
-        throw new Exception('Subject name and grade level are required');
+        echo json_encode(['success' => false, 'error' => 'Subject name and grade level are required']);
+        return;
     }
     
     if (!preg_match('/^Grade\s/', $grade_level)) {
@@ -170,7 +172,8 @@ function updateCurriculum() {
     if ($teacher_id && $day_of_week && $time_in && $time_out) {
         $conflict = checkConflictInternal($teacher_id, $day_of_week, $time_in, $time_out, $id);
         if ($conflict) {
-            throw new Exception(json_encode(['type' => 'conflict', 'data' => $conflict]));
+            echo json_encode(['success' => false, 'conflict' => $conflict]);
+            return;
         }
     }
     

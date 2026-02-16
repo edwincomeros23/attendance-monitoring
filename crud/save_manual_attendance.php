@@ -102,7 +102,7 @@ if (isset($_POST['action']) && $_POST['action'] === 'delete') {
 
 // Use INSERT ... ON DUPLICATE KEY UPDATE to upsert
  $sql = "INSERT INTO attendance (student_id, section, date, status, time_in, time_out, edited_by) VALUES (?, ?, ?, ?, ?, ?, ?)"
-     . " ON DUPLICATE KEY UPDATE section = VALUES(section), status = VALUES(status), time_in = VALUES(time_in), time_out = VALUES(time_out), edited_by = VALUES(edited_by), updated_at = CURRENT_TIMESTAMP";
+     . " ON DUPLICATE KEY UPDATE section = VALUES(section), status = VALUES(status), time_in = COALESCE(VALUES(time_in), time_in), time_out = COALESCE(VALUES(time_out), time_out), edited_by = VALUES(edited_by), updated_at = CURRENT_TIMESTAMP";
 
 // Use a safe, escaped query to avoid bind_param reference issues
 $sec_esc = $section === null ? "NULL" : "'" . $conn->real_escape_string($section) . "'";
@@ -112,7 +112,7 @@ $time_out_esc = $time_out === null ? "NULL" : "'" . $conn->real_escape_string($t
 $edited_by_esc = $edited_by === null ? "NULL" : intval($edited_by);
 
 $insert_sql = "INSERT INTO attendance (student_id, section, date, status, time_in, time_out, edited_by) VALUES (" . intval($student_db_id) . ", " . $sec_esc . ", '" . $conn->real_escape_string($date) . "', " . $status_esc . ", " . $time_in_esc . ", " . $time_out_esc . ", " . $edited_by_esc . ")"
-    . " ON DUPLICATE KEY UPDATE section = VALUES(section), status = VALUES(status), time_in = VALUES(time_in), time_out = VALUES(time_out), edited_by = VALUES(edited_by), updated_at = CURRENT_TIMESTAMP";
+    . " ON DUPLICATE KEY UPDATE section = VALUES(section), status = VALUES(status), time_in = COALESCE(VALUES(time_in), time_in), time_out = COALESCE(VALUES(time_out), time_out), edited_by = VALUES(edited_by), updated_at = CURRENT_TIMESTAMP";
 
 $res = $conn->query($insert_sql);
 if (!$res) {

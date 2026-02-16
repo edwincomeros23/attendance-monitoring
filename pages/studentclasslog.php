@@ -26,31 +26,29 @@ $today = date('Y-m-d');
 $dayName = date('l');
 $subjectNorm = strtolower(trim($subject));
 
+// Build section variants for matching attendance and curriculum
+$sectionVariants = [];
+if ($section !== '') {
+  $sectionVariants[] = $section;
+  $sectionNoNum = preg_replace('/^\d+[-\s]*/', '', $section);
+  if ($sectionNoNum !== $section && $sectionNoNum !== '') $sectionVariants[] = $sectionNoNum;
+  $gradeNumeric = null;
+  if (ctype_digit($yearRaw)) {
+    $gradeNumeric = $yearRaw;
+  } elseif (stripos($yearRaw, 'Grade') === 0) {
+    $num = trim(str_ireplace('Grade', '', $yearRaw));
+    if ($num !== '' && ctype_digit($num)) $gradeNumeric = $num;
+  }
+  if ($gradeNumeric !== null && $sectionNoNum !== '') {
+    $sectionVariants[] = $gradeNumeric . '-' . $sectionNoNum;
+  }
+}
+if (empty($sectionVariants)) $sectionVariants[] = '';
+
 // Pull matching subject schedule (time window) if provided
 $schedule = null;
 if ($subject !== '' && !empty($gradeLevels)) {
   $placeholders = implode(',', array_fill(0, count($gradeLevels), '?'));
-  // Accept section variants: exact, stripped numeric prefix, and "{grade}-{section}"
-  $sectionVariants = [];
-  if ($section !== '') {
-    $sectionVariants[] = $section;
-    // remove numeric prefix like "7-Ruby" -> "Ruby"
-    $sectionNoNum = preg_replace('/^\d+[-\s]*/', '', $section);
-    if ($sectionNoNum !== $section && $sectionNoNum !== '') $sectionVariants[] = $sectionNoNum;
-    // add grade-section form if grade is numeric
-    $gradeNumeric = null;
-    if (ctype_digit($yearRaw)) {
-      $gradeNumeric = $yearRaw;
-    } elseif (stripos($yearRaw, 'Grade') === 0) {
-      $num = trim(str_ireplace('Grade', '', $yearRaw));
-      if ($num !== '' && ctype_digit($num)) $gradeNumeric = $num;
-    }
-    if ($gradeNumeric !== null && $sectionNoNum !== '') {
-      $sectionVariants[] = $gradeNumeric . '-' . $sectionNoNum;
-    }
-  }
-  if (empty($sectionVariants)) $sectionVariants[] = ''; // fallback
-
   $sectionPlaceholders = implode(',', array_fill(0, count($sectionVariants), '?'));
   $sql = "SELECT * FROM curriculum WHERE LOWER(TRIM(subject_name)) = LOWER(TRIM(?)) AND grade_level IN ($placeholders) AND (TRIM(section) IN ($sectionPlaceholders) OR section = '' OR section IS NULL) AND ((LOWER(day_of_week) = LOWER(?) ) OR day_of_week = '' OR day_of_week IS NULL) ORDER BY id DESC LIMIT 1";
   $stmt = $conn->prepare($sql);
@@ -123,10 +121,13 @@ if ($section !== '' && !empty($gradeLevels)) {
 // Build attendance map for today filtered by section; only consider rows when a schedule exists
 $attendanceMap = [];
 if ($section !== '' && $schedule) {
-  $attSql = "SELECT student_id, status, time_in, time_out FROM attendance WHERE date = ? AND section = ?";
+  $sectionPlaceholders = implode(',', array_fill(0, count($sectionVariants), '?'));
+  $attSql = "SELECT student_id, status, time_in, time_out FROM attendance WHERE date = ? AND section IN ($sectionPlaceholders)";
   $stmt = $conn->prepare($attSql);
   if ($stmt) {
-    $stmt->bind_param('ss', $today, $section);
+    $types = 's' . str_repeat('s', count($sectionVariants));
+    $params = array_merge([$today], $sectionVariants);
+    $stmt->bind_param($types, ...$params);
     $stmt->execute();
     $res = $stmt->get_result();
     while ($row = $res->fetch_assoc()) {
@@ -256,5 +257,192 @@ if ($schedule) {
         </table>
       </div>
     </div>
+
+<script>
+// Load class log from localStorage and update the table
+// This reads from the same storage key that livecamera.php uses
+function loadClassLogFromStorage() {
+  const section = <?php echo json_encode($section); ?>;
+  const scheduleTimeIn = <?php echo json_encode($schedule['time_in'] ?? null); ?>;
+  const scheduleTimeOut = <?php echo json_encode($schedule['time_out'] ?? null); ?>;
+  
+  if (!section) return;
+  
+  // Format time to match livecamera.php's display format (e.g., "8:50 PM")
+  function formatTimeForKey(timeStr) {
+    if (!timeStr) return '';
+    try {
+      const time = new Date('2000-01-01 ' + timeStr);
+      const hours = time.getHours();
+      const minutes = time.getMinutes();
+      const period = hours >= 12 ? 'PM' : 'AM';
+      const displayHours = hours % 12 || 12;
+      return displayHours + ':' + (minutes < 10 ? '0' : '') + minutes + ' ' + period;
+    } catch (e) {
+      return timeStr;
+    }
+  }
+  
+  // Build localStorage key to match livecamera.php format
+  // Key format: classlog_{section}_{timeIn}_{timeOut}_{dateKey}
+  function getClassLogDateKey() {
+    const now = new Date();
+    const dateKey = new Date(now);
+    if (now.getHours() >= 22) { // 10 PM
+      dateKey.setDate(dateKey.getDate() + 1);
+    }
+    return dateKey.toISOString().split('T')[0];
+  }
+  
+  const timeInFormatted = formatTimeForKey(scheduleTimeIn);
+  const timeOutFormatted = formatTimeForKey(scheduleTimeOut);
+  const dateKey = getClassLogDateKey();
+  const storageKey = `classlog_${section}_${timeInFormatted}_${timeOutFormatted}_${dateKey}`;
+  const storedData = localStorage.getItem(storageKey);
+  
+  if (!storedData) return; // No data stored yet
+  
+  let classLog = {};
+  try {
+    classLog = JSON.parse(storedData);
+  } catch (e) {
+    console.error('Failed to parse class log:', e);
+    return;
+  }
+  
+  // Helper function to check if a time is within the subject's schedule window
+  function isWithinSchedule(timeStr, startTime, endTime) {
+    if (!timeStr || timeStr === '-' || !startTime || !endTime) return false;
+    
+    // Convert times to comparable format (HH:MM:SS)
+    function parseTime(str) {
+      // Handle formats like "10:35 AM" or "22:35:00"
+      let time = str.trim();
+      if (time.includes('AM') || time.includes('PM')) {
+        const [timePart, period] = time.split(' ');
+        let [hours, minutes] = timePart.split(':').map(Number);
+        if (period === 'PM' && hours !== 12) hours += 12;
+        if (period === 'AM' && hours === 12) hours = 0;
+        return hours * 3600 + minutes * 60;
+      } else {
+        const parts = time.split(':').map(Number);
+        return parts[0] * 3600 + parts[1] * 60 + (parts[2] || 0);
+      }
+    }
+    
+    const timeSeconds = parseTime(timeStr);
+    const startSeconds = parseTime(startTime);
+    const endSeconds = parseTime(endTime);
+    
+    return timeSeconds >= startSeconds && timeSeconds <= endSeconds;
+  }
+  
+  // Update table rows with stored data, filtered by schedule
+  const rows = document.querySelectorAll('#class-log tbody tr');
+  rows.forEach(row => {
+    const studentDbId = row.getAttribute('data-student-db-id');
+    if (!studentDbId) return;
+    
+    const statusCell = row.children[2];
+    const timeInCell = row.children[3];
+    const timeOutCell = row.children[4];
+    const remarksCell = row.children[5];
+    
+    const logEntry = classLog[studentDbId];
+    
+    // Check if student was detected during this specific subject's time window
+    if (logEntry && scheduleTimeIn && scheduleTimeOut) {
+      const wasInSchedule = isWithinSchedule(logEntry.timeIn, scheduleTimeIn, scheduleTimeOut) ||
+                           isWithinSchedule(logEntry.timeOut, scheduleTimeIn, scheduleTimeOut);
+      
+      if (wasInSchedule) {
+        // Student was detected during this subject's time
+        if (logEntry.status) {
+          statusCell.textContent = logEntry.status;
+          if (logEntry.status === 'Present') {
+            statusCell.style.color = 'green';
+          } else if (logEntry.status === 'Late') {
+            statusCell.style.color = 'orange';
+          } else {
+            statusCell.style.color = '#999';
+          }
+        }
+        
+        if (logEntry.timeIn && logEntry.timeIn !== '-') {
+          timeInCell.textContent = logEntry.timeIn;
+        }
+        
+        if (logEntry.timeOut && logEntry.timeOut !== '-') {
+          timeOutCell.textContent = logEntry.timeOut;
+        }
+        
+        if (logEntry.remarks) {
+          remarksCell.textContent = logEntry.remarks;
+        }
+      } else {
+        // Student was detected but not during this subject's time - keep as Absent
+        statusCell.textContent = 'Absent';
+        statusCell.style.color = '#999';
+        timeInCell.textContent = '-';
+        timeOutCell.textContent = '-';
+        remarksCell.textContent = 'Not detected during this subject';
+      }
+    } else if (logEntry) {
+      // No schedule defined, show all detections
+      if (logEntry.status) {
+        statusCell.textContent = logEntry.status;
+        if (logEntry.status === 'Present') {
+          statusCell.style.color = 'green';
+        } else if (logEntry.status === 'Late') {
+          statusCell.style.color = 'orange';
+        } else {
+          statusCell.style.color = '#999';
+        }
+      }
+      
+      if (logEntry.timeIn && logEntry.timeIn !== '-') {
+        timeInCell.textContent = logEntry.timeIn;
+      }
+      
+      if (logEntry.timeOut && logEntry.timeOut !== '-') {
+        timeOutCell.textContent = logEntry.timeOut;
+      }
+      
+      if (logEntry.remarks) {
+        remarksCell.textContent = logEntry.remarks;
+      }
+    }
+  });
+}
+
+// Schedule reset at 10 PM (synchronized with livecamera.php)
+function scheduleReset() {
+  const now = new Date();
+  const resetTime = new Date(now);
+  resetTime.setHours(22, 0, 0, 0); // 10 PM today
+  
+  if (now >= resetTime) {
+    // If already past 10 PM, schedule for tomorrow
+    resetTime.setDate(resetTime.getDate() + 1);
+  }
+  
+  const timeUntilReset = resetTime - now;
+  
+  setTimeout(() => {
+    // Reload page to show cleared state (livecamera.php handles the actual reset)
+    location.reload();
+  }, timeUntilReset);
+}
+
+// Load on page load
+document.addEventListener('DOMContentLoaded', () => {
+  loadClassLogFromStorage();
+  scheduleReset();
+  
+  // Refresh every 3 seconds to show latest updates from livecamera.php
+  setInterval(loadClassLogFromStorage, 3000);
+});
+</script>
+
 </body>
 </html>
