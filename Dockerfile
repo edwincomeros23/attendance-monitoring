@@ -21,6 +21,13 @@ RUN printf '%s\n' \
     > /etc/apache2/conf-available/attendance-monitoring.conf \
     && a2enconf attendance-monitoring
 
+# Rewrite legacy /attendance-monitoring/* paths to the app root
+RUN printf '%s\n' \
+    'RewriteEngine On' \
+    'RewriteRule ^/attendance-monitoring/(.*)$ /$1 [L,PT]' \
+    > /etc/apache2/conf-available/attendance-monitoring-redirect.conf \
+    && a2enconf attendance-monitoring-redirect
+
 # Set working directory
 WORKDIR /var/www/html
 
