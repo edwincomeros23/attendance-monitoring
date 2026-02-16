@@ -11,6 +11,16 @@ RUN docker-php-ext-install mysqli pdo pdo_mysql
 # Enable Apache modules
 RUN a2enmod rewrite headers deflate
 
+# Support legacy /attendance-monitoring paths used across the app
+RUN printf '%s\n' \
+    'Alias /attendance-monitoring/ /var/www/html/' \
+    '<Directory /var/www/html/>' \
+    '  AllowOverride All' \
+    '  Require all granted' \
+    '</Directory>' \
+    > /etc/apache2/conf-available/attendance-monitoring.conf \
+    && a2enconf attendance-monitoring
+
 # Set working directory
 WORKDIR /var/www/html
 
