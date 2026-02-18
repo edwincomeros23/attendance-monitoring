@@ -917,7 +917,10 @@ if ($year && $section) {
           }
           ngrokStatusEl.textContent = url ? `Saved. Using: ${HLS_URL}` : 'Cleared. Using local stream.';
           ngrokPanel.style.display = 'none';
-          hlsStarted = false; // force restart
+          
+          // FORCE CLEAN RESTART: stop old stream before starting new one
+          try { if (hls) { hls.destroy(); hls = null; } } catch(e){}
+          hlsStarted = false; 
           startHls();
         } else {
           ngrokStatusEl.textContent = 'Error: ' + (j.error || 'Save failed');
@@ -934,14 +937,40 @@ if ($year && $section) {
 
     // start on load (but first check whether the HLS manifest exists)
     async function checkStreamStatus() {
+      // If HLS_URL is remote (ngrok), check it directly via browser fetch
+      const isRemote = HLS_URL.startsWith('http') && !HLS_URL.includes(location.hostname);
+      
+      if (isRemote) {
+        console.log('Checking remote stream status:', HLS_URL);
+        try {
+          // Use HEAD request to check if manifest exists on the ngrok tunnel
+          const res = await fetch(HLS_URL, { method: 'HEAD', cache: 'no-store' });
+          if (res.ok) {
+            setStatus('Remote manifest present, starting...', 'rgba(0,128,0,0.8)');
+            startHls();
+          } else {
+            console.warn('Remote manifest check returned:', res.status);
+            setStatus('Remote stream not found (Check ngrok)', 'rgba(128,0,0,0.8)');
+          }
+        } catch (err) {
+          // If fetch fails (CORS), just try starting HLS anyway as a fallback
+          console.info('CORS/Connection error on status check, attempting load anyway', err);
+          setStatus('Connecting to remote stream...', 'rgba(0,128,0,0.8)');
+          startHls();
+        }
+        return;
+      }
+
+      // Local check for default stream
       try {
         const res = await fetch('/attendance-monitoring/config/stream_status.php', { cache: 'no-store' });
         const j = await res.json();
         if (j && j.exists) {
+          console.log('Local manifest found.');
           setStatus('Manifest present, starting stream...', 'rgba(0,128,0,0.8)');
           startHls();
         } else {
-          setStatus('No manifest yet — waiting...', 'rgba(128,0,0,0.8)');
+          setStatus('No manifest yet — waiting (local)...', 'rgba(128,0,0,0.8)');
         }
       } catch (err) {
         console.warn('Stream status check failed', err);
