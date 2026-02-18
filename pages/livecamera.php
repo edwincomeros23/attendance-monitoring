@@ -231,6 +231,17 @@ if ($year && $section) {
   <!-- diag hidden per user request -->
   <div id="diag" style="display:none;position:absolute;top:12px;right:160px;background:rgba(0,0,0,0.6);color:#fff;padding:6px 8px;border-radius:6px;z-index:4;font-size:13px">diag</div>
   <button id="reloadStreamBtn" class="manual-btn" style="position:absolute;top:12px;left:12px;z-index:3">Reload Stream</button>
+  <!-- ngrok URL config panel -->
+  <div id="ngrok-panel" style="position:absolute;top:50px;left:12px;z-index:5;background:rgba(0,0,0,0.75);border-radius:8px;padding:8px 10px;display:none;min-width:320px">
+    <div style="color:#fff;font-size:12px;margin-bottom:4px">📡 Stream URL (ngrok or local)</div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <input id="ngrok-url-input" type="text" placeholder="https://xxxx.ngrok-free.app" style="flex:1;padding:5px 8px;border-radius:5px;border:none;font-size:12px;min-width:0" />
+      <button id="ngrok-save-btn" style="padding:5px 10px;background:#1976d2;color:#fff;border:none;border-radius:5px;font-size:12px;cursor:pointer;white-space:nowrap">Save & Reload</button>
+      <button id="ngrok-clear-btn" style="padding:5px 8px;background:#555;color:#fff;border:none;border-radius:5px;font-size:12px;cursor:pointer">Clear</button>
+    </div>
+    <div id="ngrok-status" style="color:#aaa;font-size:11px;margin-top:4px"></div>
+  </div>
+  <button id="ngrok-toggle-btn" class="manual-btn" style="position:absolute;top:50px;left:12px;z-index:4;font-size:11px;padding:4px 10px">⚙ Stream URL</button>
 
   <button id="toggleCameraBtn">Turn Off Camera</button>
       </div>
@@ -572,7 +583,20 @@ if ($year && $section) {
   // HLS.js to play .m3u8 stream in browsers with retry/cache-bust
   // NOTE: point this at the HLS output inside your XAMPP htdocs folder so Apache can serve it.
   // We'll use a path relative to the site: /attendance-monitoring/stream/index.m3u8
-  const HLS_URL = `${location.origin}/attendance-monitoring/stream/index.m3u8`;
+  // HLS stream URL — loaded from server config (supports ngrok override)
+  let HLS_URL = `${location.origin}/attendance-monitoring/stream/index.m3u8`;
+  async function loadStreamConfig() {
+    try {
+      const res = await fetch('/attendance-monitoring/crud/stream_config.php', { cache: 'no-store' });
+      const j = await res.json();
+      if (j && j.stream_url && j.stream_url.trim() !== '') {
+        const base = j.stream_url.replace(/\/+$/, '');
+        HLS_URL = `${base}/attendance-monitoring/stream/index.m3u8`;
+        document.getElementById('ngrok-url-input').value = j.stream_url;
+        document.getElementById('ngrok-status').textContent = 'Saved URL loaded ✓';
+      }
+    } catch(e) { console.warn('Could not load stream config', e); }
+  }
     const statusEl = document.getElementById('stream-status');
     const reloadBtn = document.getElementById('reloadStreamBtn');
     let hls = null;
@@ -860,13 +884,60 @@ if ($year && $section) {
     }
 
     reloadBtn.addEventListener('click', () => startHls());
+
+    // ngrok panel toggle & save logic
+    const ngrokToggleBtn = document.getElementById('ngrok-toggle-btn');
+    const ngrokPanel = document.getElementById('ngrok-panel');
+    const ngrokSaveBtn = document.getElementById('ngrok-save-btn');
+    const ngrokClearBtn = document.getElementById('ngrok-clear-btn');
+    const ngrokInput = document.getElementById('ngrok-url-input');
+    const ngrokStatusEl = document.getElementById('ngrok-status');
+
+    ngrokToggleBtn.addEventListener('click', () => {
+      const visible = ngrokPanel.style.display !== 'none';
+      ngrokPanel.style.display = visible ? 'none' : 'block';
+    });
+
+    ngrokSaveBtn.addEventListener('click', async () => {
+      const url = ngrokInput.value.trim();
+      ngrokStatusEl.textContent = 'Saving...';
+      try {
+        const res = await fetch('/attendance-monitoring/crud/stream_config.php', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ stream_url: url })
+        });
+        const j = await res.json();
+        if (j.success) {
+          if (url) {
+            const base = url.replace(/\/+$/, '');
+            HLS_URL = `${base}/attendance-monitoring/stream/index.m3u8`;
+          } else {
+            HLS_URL = `${location.origin}/attendance-monitoring/stream/index.m3u8`;
+          }
+          ngrokStatusEl.textContent = url ? `Saved. Using: ${HLS_URL}` : 'Cleared. Using local stream.';
+          ngrokPanel.style.display = 'none';
+          hlsStarted = false; // force restart
+          startHls();
+        } else {
+          ngrokStatusEl.textContent = 'Error: ' + (j.error || 'Save failed');
+        }
+      } catch(e) {
+        ngrokStatusEl.textContent = 'Network error';
+      }
+    });
+
+    ngrokClearBtn.addEventListener('click', () => {
+      ngrokInput.value = '';
+      ngrokStatusEl.textContent = 'Cleared (press Save & Reload to apply)';
+    });
+
     // start on load (but first check whether the HLS manifest exists)
     async function checkStreamStatus() {
       try {
         const res = await fetch('/attendance-monitoring/config/stream_status.php', { cache: 'no-store' });
         const j = await res.json();
         if (j && j.exists) {
-          // manifest present, start HLS if not already started
           setStatus('Manifest present, starting stream...', 'rgba(0,128,0,0.8)');
           startHls();
         } else {
@@ -878,15 +949,18 @@ if ($year && $section) {
       }
     }
 
-    // poll for manifest (useful during ffmpeg startup)
-    checkStreamStatus();
-    setInterval(checkStreamStatus, 2500);
+    // Load saved ngrok URL first, then start polling for stream
+    loadStreamConfig().then(() => {
+      checkStreamStatus();
+      setInterval(checkStreamStatus, 2500);
+    });
+
 
 
     async function loadModels() {
       await faceapi.nets.tinyFaceDetector.loadFromUri('/attendance-monitoring/models');
-      detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 704, scoreThreshold: 0.25 });
-      descriptorDetectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 704, scoreThreshold: 0.25 });
+      detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 608, scoreThreshold: 0.15 });
+      descriptorDetectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 608, scoreThreshold: 0.15 });
       detectionWidth = 704;
       activeDetector = 'tiny';
 
@@ -932,15 +1006,18 @@ if ($year && $section) {
             }
           }
           const descriptors = [];
-          for (const url of imgs) {
+          // Load all images in parallel for faster startup
+          const results = await Promise.all(imgs.map(async url => {
             try {
               const img = await faceapi.fetchImage(url);
               const detection = await faceapi.detectSingleFace(img, descriptorDetectorOptions).withFaceLandmarks().withFaceDescriptor();
-              if (detection && detection.descriptor) descriptors.push(detection.descriptor);
+              return (detection && detection.descriptor) ? detection.descriptor : null;
             } catch (e) {
               console.warn('Failed to load/encode', url, e);
+              return null;
             }
-          }
+          }));
+          results.filter(Boolean).forEach(d => descriptors.push(d));
           if (descriptors.length > 0) {
             labeled.push(new faceapi.LabeledFaceDescriptors(baseLabel, descriptors));
             console.log('Loaded labeled descriptor for', label, '->', baseLabel);
@@ -1077,34 +1154,30 @@ if ($year && $section) {
         ctx.restore();
       }
 
+      function iou(a, b) {
+        const ax1 = a.x, ay1 = a.y, ax2 = a.x + a.width, ay2 = a.y + a.height;
+        const bx1 = b.x, by1 = b.y, bx2 = b.x + b.width, by2 = b.y + b.height;
+        const ix1 = Math.max(ax1, bx1), iy1 = Math.max(ay1, by1);
+        const ix2 = Math.min(ax2, bx2), iy2 = Math.min(ay2, by2);
+        const iw = Math.max(0, ix2 - ix1), ih = Math.max(0, iy2 - iy1);
+        const inter = iw * ih;
+        if (inter <= 0) return 0;
+        const sA = a.width * a.height;
+        const sB = b.width * b.height;
+        const ua = sA + sB - inter;
+        return ua > 0 ? inter / ua : 0;
+      }
+
       let detectBusy = false;
       let subjectResetDone = false;
+      let detectFrameCount = 0; // throttle descriptor extraction
+      const DESCRIPTOR_EVERY_N_FRAMES = 5; // run full pipeline every 5 frames
       async function detectLoop() {
-        // Only process NEW detections if current time is within the schedule window
-        // But keep showing existing tracked boxes even outside schedule
+        // Always render tracked boxes, even outside schedule
         const withinSchedule = isWithinScheduleWindow();
-        
-        if (!withinSchedule) {
-          // Outside schedule: just render existing tracked boxes, don't detect new faces
-          ctx.clearRect(0, 0, overlay.width, overlay.height);
-          const now = Date.now();
-          for (const trackKey in trackerLastBoxes) {
-            const tracker = trackerLastBoxes[trackKey];
-            if (now - tracker.lastSeen < TRACKER_HOLD_MS) {
-              drawTrackedBox(tracker, tracker.labelText, tracker.isUnknown);
-            }
-          }
-          requestAnimationFrame(detectLoop);
-          return;
-        }
+
         if (detectBusy) { setTimeout(detectLoop, 20); return; }
         if (video.paused || video.ended) {
-          setTimeout(detectLoop, 120);
-          return;
-        }
-
-        if (!hasScheduleWindow) {
-          detectBusy = false;
           setTimeout(detectLoop, 120);
           return;
         }
@@ -1136,13 +1209,15 @@ if ($year && $section) {
         }
 
         detectBusy = true;
-        // Downscale frame before detection to reduce CPU
-        // Slightly higher resolution feed to improve distance detection
+        detectFrameCount++;
+        const runFullPipeline = (detectFrameCount % DESCRIPTOR_EVERY_N_FRAMES === 0);
+
         if (!video.videoWidth || !video.videoHeight) {
           detectBusy = false;
           setTimeout(detectLoop, 80);
           return;
         }
+
         const detW = detectionWidth;
         const detH = Math.max(1, Math.round(video.videoHeight / video.videoWidth * detW));
         if (detW <= 0 || detH <= 0) {
@@ -1150,285 +1225,202 @@ if ($year && $section) {
           setTimeout(detectLoop, 80);
           return;
         }
+
         detectionCanvas.width = detW;
         detectionCanvas.height = detH;
         try { detectionCtx.drawImage(video, 0, 0, detW, detH); } catch(e) {}
 
-        const detections = await faceapi.detectAllFaces(detectionCanvas, detectorOptions).withFaceLandmarks().withFaceDescriptors();
-        ctx.clearRect(0,0,overlay.width,overlay.height);
-        const ratioX = overlay.width / detW;
-        const ratioY = overlay.height / detH;
-
-        // Process ALL detections - track and display each one
+        const now = performance.now();
+        let currentDetections = [];
         const processedLabels = new Set();
-        const currentTrackKeys = new Set();
-        const matchedKeys = new Set();
+        const factorX = overlay.width / detW;
+        const factorY = overlay.height / detH;
 
-        const meta = [];
-        for (let i = 0; i < detections.length; i++) {
-          const det = detections[i];
-          const score = (det.detection && typeof det.detection.score === 'number') ? det.detection.score : (det.detection.box.width * det.detection.box.height);
-          if (score < MIN_CONFIDENCE_THRESHOLD) continue;
+        try {
+          if (runFullPipeline) {
+            const raw = await faceapi.detectAllFaces(detectionCanvas, detectorOptions).withFaceLandmarks().withFaceDescriptors();
+            for (const d of raw) {
+              const score = d.detection.score;
+              if (score < MIN_CONFIDENCE_THRESHOLD) continue;
+              
+              const box = d.detection.box;
+              const normalized = { x: box.x * factorX, y: box.y * factorY, width: box.width * factorX, height: box.height * factorY };
+              
+              let label = 'Unknown';
+              let displayName = 'Unknown';
+              let studentDbId = null;
+              let isUnknown = true;
+              let matchInfo = null;
 
-          let label = 'Unknown';
-          let matchInfo = null;
-          let displayName = 'Unknown';
-          let studentDbId = null;
-          let stuObj = null;
-          let isUnknown = true;
-
-          if (globalFaceMatcher && det.descriptor) {
-            const match = globalFaceMatcher.findBestMatch(det.descriptor);
-            if (match && match.label && match.label !== 'unknown' && match.distance < 0.5) {
-              const key = match.label;
-              matchedKeys.add(key);
-              confirmCounts[key] = (confirmCounts[key] || 0) + 1;
-              const confirmed = confirmCounts[key] >= CONFIRM_FRAMES;
-              if (confirmed) {
-                label = match.label;
-                matchInfo = match;
-                isUnknown = false;
-                try {
-                  stuObj = await fetchStudentInfo(label);
-                  if (stuObj) {
-                    displayName = stuObj.full_name || stuObj.student_id || label;
-                    studentDbId = stuObj.id || null;
+              if (globalFaceMatcher && d.descriptor) {
+                const match = globalFaceMatcher.findBestMatch(d.descriptor);
+                if (match && match.label !== 'unknown' && match.distance < 0.5) {
+                  const mLabel = match.label;
+                  confirmCounts[mLabel] = (confirmCounts[mLabel] || 0) + 1;
+                  if (confirmCounts[mLabel] >= CONFIRM_FRAMES) {
+                    label = mLabel;
+                    matchInfo = match;
+                    isUnknown = false;
+                    const stu = await fetchStudentInfo(label);
+                    if (stu) {
+                      displayName = stu.full_name || stu.student_id;
+                      studentDbId = stu.id;
+                    }
+                  } else {
+                    displayName = 'Verifying...';
                   }
-                } catch (e) {
-                  console.warn('Failed to fetch student info for', label, e);
                 }
-              } else {
-                displayName = 'Verifying...';
-                isUnknown = true;
               }
+              currentDetections.push({ box: normalized, label, displayName, isUnknown, studentDbId });
             }
-          }
-
-          meta.push({ det, score, label, matchInfo, displayName, studentDbId, isUnknown });
-        }
-
-        // Deduplicate recognized faces by keeping best match per label
-        const bestByLabel = new Map();
-        const unknowns = [];
-        for (const m of meta) {
-          if (!m.isUnknown) {
-            const key = m.studentDbId ? String(m.studentDbId) : String(m.label);
-            const prev = bestByLabel.get(key);
-            const better = !prev || (m.matchInfo && prev.matchInfo && m.matchInfo.distance < prev.matchInfo.distance) || (!prev.matchInfo && m.matchInfo) || (m.score > prev.score);
-            if (better) bestByLabel.set(key, m);
           } else {
-            unknowns.push(m);
-          }
-        }
-
-        // Suppress overlapping unknown detections (simple NMS)
-        function iou(a, b) {
-          const ax1 = a.x, ay1 = a.y, ax2 = a.x + a.width, ay2 = a.y + a.height;
-          const bx1 = b.x, by1 = b.y, bx2 = b.x + b.width, by2 = b.y + b.height;
-          const ix1 = Math.max(ax1, bx1), iy1 = Math.max(ay1, by1);
-          const ix2 = Math.min(ax2, bx2), iy2 = Math.min(ay2, by2);
-          const iw = Math.max(0, ix2 - ix1), ih = Math.max(0, iy2 - iy1);
-          const inter = iw * ih;
-          const ua = (ax2 - ax1) * (ay2 - ay1) + (bx2 - bx1) * (by2 - by1) - inter;
-          return ua > 0 ? inter / ua : 0;
-        }
-        unknowns.sort((a, b) => b.score - a.score);
-        const keptUnknowns = [];
-        for (const u of unknowns) {
-          const boxU = u.det.detection.box;
-          let overlap = false;
-          for (const k of keptUnknowns) {
-            const boxK = k.det.detection.box;
-            if (iou(boxU, boxK) > 0.4) { overlap = true; break; }
-          }
-          if (!overlap) keptUnknowns.push(u);
-        }
-
-        const finalDetections = [...bestByLabel.values(), ...keptUnknowns];
-
-        for (let i = 0; i < finalDetections.length; i++) {
-          const item = finalDetections[i];
-          const det = item.det;
-          const score = item.score;
-
-          let label = item.label;
-          let matchInfo = item.matchInfo;
-          let displayName = item.displayName;
-          let studentDbId = item.studentDbId;
-          let isUnknown = item.isUnknown;
-          let lookupId = null;
-          
-          // DO NOT use OVERRIDE for unknown faces — only show/track recognized students
-          // isUnknown stays true if no match found, so unknown faces remain "Unknown"
-          // and won't update class log or trigger attendance
-          
-          if (!isUnknown) {
-            lookupId = studentDbId ? String(studentDbId) : String(label);
-          }
-          const trackKey = !isUnknown && lookupId ? `r_${lookupId}` : `u_${i}`;
-          currentTrackKeys.add(trackKey);
-
-          const box = det.detection.box;
-          const x = box.x * ratioX;
-          const y = box.y * ratioY;
-          const w = box.width * ratioX;
-          const h = box.height * ratioY;
-          const now = performance.now();
-
-          // Get or create tracking box for this face
-          if (!trackerLastBoxes[trackKey]) {
-            trackerLastBoxes[trackKey] = {
-              x,
-              y,
-              w,
-              h,
-              alpha: 0.85,
-              lastSeen: now,
-              labelText: '',
-              isUnknown: true,
-              lookupId: null
-            };
-          }
-
-          // Smoothing interpolation
-          const tracker = trackerLastBoxes[trackKey];
-          tracker.x += (x - tracker.x) * TRACKER_SMOOTHING;
-          tracker.y += (y - tracker.y) * TRACKER_SMOOTHING;
-          tracker.w += (w - tracker.w) * TRACKER_SMOOTHING;
-          tracker.h += (h - tracker.h) * TRACKER_SMOOTHING;
-          tracker.alpha = Math.min(1, tracker.alpha + 0.2);
-          tracker.lastSeen = now;
-          tracker.isUnknown = isUnknown;
-          tracker.labelText = isUnknown ? 'Unknown' : (displayName || label);
-          tracker.lookupId = (!isUnknown && lookupId) ? lookupId : null;
-
-          drawTrackedBox(tracker, tracker.labelText, tracker.isUnknown);
-          
-          // Update class log for recognized students in this section (only if schedule exists)
-          if (!isUnknown && hasScheduleWindow) {
-            const lookupId = studentDbId ? String(studentDbId) : String(label);
-            const existing = classLog.querySelector('tbody tr[data-student-db-id="' + lookupId + '"]');
-            
-            if (existing) {
-              // Update existing row if student is in this section
-              // Set Time-In ONLY on first capture
-              if (!firstSeenMap[lookupId]) {
-                firstSeenMap[lookupId] = Date.now();
-                const timeInEl = existing.querySelector('.time-in');
-                const timeInText = new Date(firstSeenMap[lookupId]).toLocaleTimeString();
-                if (timeInEl) timeInEl.textContent = timeInText;
-                const firstSeenTs = firstSeenMap[lookupId];
-                const withinSchedule = !!(scheduleStart && scheduleEnd && firstSeenTs >= scheduleStart.getTime() && firstSeenTs <= scheduleEnd.getTime());
-                const isLate = !!(withinSchedule && lateCutoff && firstSeenTs > lateCutoff.getTime());
-                const status = isLate ? 'Late' : 'Present';
-                statusMap[lookupId] = status;
-                // Persist attendance with time-in when first captured
-                if (studentDbId) saveAttendanceUpdate(studentDbId, { status, timeInTs: firstSeenMap[lookupId] });
-                if (studentDbId) {
-                  persistAttendanceForStudent(studentDbId, {
-                    status,
-                    time_in: timeInText,
-                    remarks: status === 'Late' ? 'Late' : 'Detected'
-                  });
-                }
+            // Fast path: reuse previous labels based on IoU overlap
+            const raw = await faceapi.detectAllFaces(detectionCanvas, detectorOptions);
+            for (const d of raw) {
+              const score = d.score;
+              if (score < MIN_CONFIDENCE_THRESHOLD) continue;
+              const box = d.box;
+              const normalized = { x: box.x * factorX, y: box.y * factorY, width: box.width * factorX, height: box.height * factorY };
+              
+              // Find best overlapping tracker to inherit identity
+              let bestTracker = null;
+              let bestIoU = 0;
+              for (const key in trackerLastBoxes) {
+                const t = trackerLastBoxes[key];
+                const tBox = { x: t.x, y: t.y, width: t.w, height: t.h };
+                const i = iou(normalized, tBox);
+                if (i > bestIoU) { bestIoU = i; bestTracker = t; }
               }
-              // Track last seen time for Time-Out updates when leaving
-              lastSeenMap[lookupId] = Date.now();
-              const statusCell = existing.querySelector('td:nth-child(3)');
-              if (statusCell) {
-                const currentStatus = statusMap[lookupId] || 'Present';
-                statusCell.textContent = currentStatus;
-                statusCell.style.color = currentStatus === 'Late' ? '#d97706' : 'green';
-              }
-              const remarksCell = existing.querySelector('td:nth-child(6)');
-              if (remarksCell) {
-                const currentStatus = statusMap[lookupId] || 'Present';
-                remarksCell.textContent = currentStatus === 'Late' ? 'Late' : 'Detected';
-              }
-              if (studentDbId) {
-                const currentStatus = statusMap[lookupId] || 'Present';
-                persistAttendanceForStudent(studentDbId, {
-                  status: currentStatus,
-                  remarks: currentStatus === 'Late' ? 'Late' : 'Detected'
+
+              if (bestTracker && bestIoU > 0.3) {
+                currentDetections.push({ 
+                  box: normalized, 
+                  label: bestTracker.labelText, 
+                  displayName: bestTracker.labelText, 
+                  isUnknown: bestTracker.isUnknown, 
+                  studentDbId: bestTracker.lookupId 
                 });
-              }
-
-              const verifySelect = existing.querySelector('.verify-select');
-              const verifyBtn = existing.querySelector('.verify-btn');
-              if (verifySelect && verifyBtn) {
-                verifySelect.disabled = false;
-                verifyBtn.disabled = false;
-                verifySelect.value = String(studentDbId || '');
-                verifyBtn.dataset.predictedId = String(studentDbId || '');
+              } else {
+                currentDetections.push({ box: normalized, label: 'Unknown', displayName: 'Unknown', isUnknown: true, studentDbId: null });
               }
             }
-            
-            processedLabels.add(lookupId);
+          }
+        } catch(err) { console.warn('Detection error', err); }
+
+        // deduplicate overlapping detections (NMS)
+        currentDetections.sort((a,b) => (a.isUnknown ? 0 : 1) - (b.isUnknown ? 0 : 1)); // prioritize recognized
+        const kept = [];
+        for (const d of currentDetections) {
+          let overlap = false;
+          for (const k of kept) {
+            if (iou(d.box, k.box) > 0.4) { overlap = true; break; }
+          }
+          if (!overlap) kept.push(d);
+        }
+
+        // Update Trackers
+        ctx.clearRect(0,0,overlay.width,overlay.height);
+        const nextTrackKeys = new Set();
+        
+        for (let i = 0; i < kept.length; i++) {
+          const d = kept[i];
+          let trackKey = null;
+          let bestIoU = 0;
+
+          // Match to best existing tracker
+          for (const key in trackerLastBoxes) {
+            if (nextTrackKeys.has(key)) continue;
+            const t = trackerLastBoxes[key];
+            const tBox = { x: t.x, y: t.y, width: t.w, height: t.h };
+            const val = iou(d.box, tBox);
+            if (val > bestIoU) { bestIoU = val; trackKey = key; }
+          }
+
+          if (bestIoU < 0.2) {
+            // New tracker
+            trackKey = d.isUnknown ? `u_${now}_${i}` : `r_${d.studentDbId || d.label}`;
+            trackerLastBoxes[trackKey] = { x: d.box.x, y: d.box.y, w: d.box.width, h: d.box.height, alpha: 0, lastSeen: now };
+          }
+
+          const t = trackerLastBoxes[trackKey];
+          t.x += (d.box.x - t.x) * TRACKER_SMOOTHING;
+          t.y += (d.box.y - t.y) * TRACKER_SMOOTHING;
+          t.w += (d.box.width - t.w) * TRACKER_SMOOTHING;
+          t.h += (d.box.height - t.h) * TRACKER_SMOOTHING;
+          t.alpha = Math.min(1, t.alpha + 0.2);
+          t.lastSeen = now;
+          t.labelText = d.displayName;
+          t.isUnknown = d.isUnknown;
+          t.lookupId = d.studentDbId;
+          if (!d.isUnknown && d.studentDbId) processedLabels.add(String(d.studentDbId));
+          nextTrackKeys.add(trackKey);
+
+          drawTrackedBox(t, t.labelText, t.isUnknown);
+
+          // Update Attendance Log (only in full pipeline or if already confirmed)
+          if (!d.isUnknown && d.studentDbId && hasScheduleWindow) {
+            const sid = String(d.studentDbId);
+            const row = document.querySelector(`#class-log tbody tr[data-student-db-id="${sid}"]`);
+            if (row) {
+              if (!firstSeenMap[sid]) {
+                firstSeenMap[sid] = Date.now();
+                const timeInText = new Date(firstSeenMap[sid]).toLocaleTimeString();
+                const timeInEl = row.querySelector('.time-in');
+                if (timeInEl) timeInEl.textContent = timeInText;
+                
+                const fts = firstSeenMap[sid];
+                const status = (lateCutoff && fts > lateCutoff.getTime()) ? 'Late' : 'Present';
+                statusMap[sid] = status;
+                
+                saveAttendanceUpdate(d.studentDbId, { status, timeInTs: fts });
+                persistAttendanceForStudent(d.studentDbId, { status, time_in: timeInText, remarks: status });
+              }
+              lastSeenMap[sid] = Date.now();
+              const sCell = row.querySelector('td:nth-child(3)');
+              if (sCell) { 
+                sCell.textContent = statusMap[sid]; 
+                sCell.style.color = statusMap[sid] === 'Late' ? '#d97706' : 'green';
+              }
+            }
           }
         }
-        
-        Object.keys(confirmCounts).forEach(key => {
-          if (!matchedKeys.has(key)) confirmCounts[key] = 0;
-        });
 
         // For any previously seen label not in the current frame, set Time-Out to scheduled end time or last seen
         prevSeenLabels.forEach(id => {
           if (!processedLabels.has(id)) {
-            const row = classLog.querySelector('tbody tr[data-student-db-id="' + id + '"]');
+            const row = document.querySelector(`#class-log tbody tr[data-student-db-id="${id}"]`);
             if (row) {
-              // Only set Time-Out if we already have a Time-In for this student
               const hasTimeIn = !!firstSeenMap[id];
               const timeOutEl = row.querySelector('.time-out');
               let timeOutText = null;
               if (hasTimeIn && timeOutEl && timeOutEl.textContent === '-') {
-                // Use scheduled end time if available, otherwise use last seen time
                 let timeOutTs = lastSeenMap[id] || Date.now();
-                if (scheduleEnd) {
-                  timeOutTs = scheduleEnd.getTime();
-                }
+                if (scheduleEnd) timeOutTs = scheduleEnd.getTime();
                 timeOutText = new Date(timeOutTs).toLocaleTimeString();
                 timeOutEl.textContent = timeOutText;
               }
               const remarksCell = row.querySelector('td:nth-child(6)');
               if (remarksCell && hasTimeIn && timeOutText) remarksCell.textContent = 'Left';
-              if (remarksCell && !hasTimeIn) remarksCell.textContent = 'Not yet detected';
-              // Persist attendance with time-out when student leaves frame
+              
               const studentDbId = parseInt(id, 10);
               if (hasTimeIn && !Number.isNaN(studentDbId)) {
                 let ts = lastSeenMap[id] || Date.now();
-                if (scheduleEnd) {
-                  ts = scheduleEnd.getTime();
-                }
+                if (scheduleEnd) ts = scheduleEnd.getTime();
                 const status = statusMap[id] || 'Present';
                 saveAttendanceUpdate(studentDbId, { status, timeOutTs: ts });
-                if (timeOutText) {
-                  persistAttendanceForStudent(studentDbId, { time_out: timeOutText, remarks: 'Left' });
-                }
+                if (timeOutText) persistAttendanceForStudent(studentDbId, { time_out: timeOutText, remarks: 'Left' });
               }
             }
           }
         });
-        // Update prevSeenLabels for next iteration
         prevSeenLabels = new Set(processedLabels);
-        
-        // Clean up tracking boxes for faces no longer detected
-        const nowHold = performance.now();
-        Object.keys(trackerLastBoxes).forEach(key => {
-          if (currentTrackKeys.has(key)) return;
-          const tracker = trackerLastBoxes[key];
-          const isRecognized = key.startsWith('r_');
-          if (isRecognized && tracker && (nowHold - (tracker.lastSeen || 0)) <= TRACKER_HOLD_MS) {
-            // Keep the last box briefly to reduce jitter and avoid rapid timeout
-            tracker.alpha = Math.max(TRACKER_MIN_ALPHA, (tracker.alpha || 0) - 0.08);
-            drawTrackedBox(tracker, tracker.labelText, tracker.isUnknown);
-            if (tracker.lookupId) {
-              processedLabels.add(tracker.lookupId);
-              lastSeenMap[tracker.lookupId] = Date.now();
-            }
-            return;
+
+        // Clean up dead trackers (only those not updated in this frame)
+        for (const key in trackerLastBoxes) {
+          if (!nextTrackKeys.has(key) && (now - trackerLastBoxes[key].lastSeen > TRACKER_HOLD_MS)) {
+            delete trackerLastBoxes[key];
           }
-          delete trackerLastBoxes[key];
-        });
+        }
 
         detectBusy = false;
         setTimeout(detectLoop, 80);
@@ -1436,6 +1428,7 @@ if ($year && $section) {
 
       detectLoop();
     }
+
 
     // Start recognition after HLS manifest leads to video playback
     document.getElementById('liveVideo').addEventListener('play', () => {
