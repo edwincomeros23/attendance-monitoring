@@ -23,8 +23,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     // Only attempt login if no error so far
     if (empty($error)) {
-        // Query admin table instead of users
-        $stmt = $conn->prepare("SELECT id, password, 'admin' as role FROM admin WHERE username = ?");
+        // Query users table for login (admin or teacher)
+        $stmt = $conn->prepare("SELECT id, password, role FROM users WHERE username = ?");
         $stmt->bind_param("s", $username);
         $stmt->execute();
         $stmt->store_result();
@@ -36,7 +36,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
           if ($password === $db_password) { // plain-text check
             $_SESSION["user_id"] = $user_id;
             $_SESSION["username"] = $username;
-            $_SESSION["role"] = $role ? $role : 'admin';
+            $_SESSION["role"] = $role ? $role : 'teacher';
             $_SESSION['school_year'] = $selected_year;
             header("Location: /attendance-monitoring/pages/dashboard.php");
             exit;
@@ -44,7 +44,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $error = "Invalid password!";
           }
         } else {
-          $error = "No admin found with that username!";
+          $error = "No user found with that username!";
         }
         $stmt->close();
     }

@@ -94,7 +94,7 @@ Or use Render dashboard MySQL admin.
 
 ### Step 12: Import Schema
 ```bash
-mysql -h dpg-xxx.render.com -u [DB_USER] -p [DB_PASSWORD] attendance_monitoring < schema.sql
+mysql -h dpg-xxx.render.com -u [DB_USER] -p [DB_PASSWORD] attendance_monitoring < attendance_db.sql
 ```
 
 ### Step 13: Verify Database

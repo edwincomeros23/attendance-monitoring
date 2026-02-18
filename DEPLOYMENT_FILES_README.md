@@ -22,7 +22,7 @@ This directory contains container and deployment configuration for Render.com ho
 - Reduces image size from ~2GB to ~600MB
 - Ignores: .git, node_modules, vendor, stream segments, Python cache
 
-### `schema.sql`
+
 - Complete database schema for WMSU Attendance Monitoring
 - Tables: admin, students, curriculum, attendance, recognition_logs, camera_settings, manual_attendance
 - Includes default admin user (change password after deployment)
@@ -49,7 +49,7 @@ This directory contains container and deployment configuration for Render.com ho
 
 ```bash
 # 1. Push to GitHub
-git add Dockerfile render.yaml schema.sql .dockerignore DEPLOYMENT.md DEPLOYMENT_CHECKLIST.md
+git add Dockerfile render.yaml .dockerignore DEPLOYMENT.md DEPLOYMENT_CHECKLIST.md
 git commit -m "Add Render.com deployment configuration"
 git push origin main
 

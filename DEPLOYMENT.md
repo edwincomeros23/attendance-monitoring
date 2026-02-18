@@ -93,7 +93,7 @@ mysql -h $DB_HOST -u $DB_USER -p$DB_PASSWORD -e "CREATE DATABASE attendance_moni
 
 Then import your schema:
 ```bash
-mysql -h $DB_HOST -u $DB_USER -p$DB_PASSWORD attendance_monitoring < schema.sql
+mysql -h $DB_HOST -u $DB_USER -p$DB_PASSWORD attendance_monitoring < attendance_db.sql
 ```
 
 ### 3.2 Access Your System
