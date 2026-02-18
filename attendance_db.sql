@@ -3989,6 +3989,7 @@ INSERT INTO `notification_logs` (`id`, `student_id`, `channel`, `recipient`, `ev
 -- Table structure for table `recognition_logs`
 --
 
+DROP TABLE IF EXISTS `recognition_logs`;
 CREATE TABLE `recognition_logs` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `predicted_id` int(11) NOT NULL,
@@ -4026,12 +4027,14 @@ INSERT INTO `recognition_logs` (`id`, `predicted_id`, `actual_id`, `is_correct`,
 -- Table structure for table `sections`
 --
 
+DROP TABLE IF EXISTS `sections`;
 CREATE TABLE `sections` (
-  `id` int(11) NOT NULL,
+  `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(255) NOT NULL,
   `grade_level` tinyint(4) NOT NULL,
   `image` varchar(255) DEFAULT NULL,
-  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
@@ -4052,8 +4055,9 @@ INSERT INTO `sections` (`id`, `name`, `grade_level`, `image`, `created_at`) VALU
 -- Table structure for table `sms_notifications`
 --
 
+DROP TABLE IF EXISTS `sms_notifications`;
 CREATE TABLE `sms_notifications` (
-  `id` int(11) NOT NULL,
+  `id` int(11) NOT NULL AUTO_INCREMENT,
   `student_id` int(11) NOT NULL,
   `phone_number` varchar(20) NOT NULL,
   `event_type` enum('time_in','time_out','late','absent') NOT NULL,
@@ -4061,7 +4065,8 @@ CREATE TABLE `sms_notifications` (
   `status` enum('sent','failed','pending') DEFAULT 'pending',
   `response` text DEFAULT NULL,
   `sent_at` datetime DEFAULT NULL,
-  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
@@ -4077,8 +4082,9 @@ INSERT INTO `sms_notifications` (`id`, `student_id`, `phone_number`, `event_type
 -- Table structure for table `students`
 --
 
+DROP TABLE IF EXISTS `students`;
 CREATE TABLE `students` (
-  `id` int(11) NOT NULL,
+  `id` int(11) NOT NULL AUTO_INCREMENT,
   `student_id` varchar(20) NOT NULL,
   `full_name` varchar(100) NOT NULL,
   `birthdate` date DEFAULT NULL,
@@ -4092,7 +4098,8 @@ CREATE TABLE `students` (
   `photo1` varchar(255) DEFAULT NULL,
   `photo2` varchar(255) DEFAULT NULL,
   `photo3` varchar(255) DEFAULT NULL,
-  `photo4` varchar(255) DEFAULT NULL
+  `photo4` varchar(255) DEFAULT NULL,
+  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
@@ -4119,8 +4126,9 @@ INSERT INTO `students` (`id`, `student_id`, `full_name`, `birthdate`, `gender`, 
 -- Table structure for table `teachers`
 --
 
+DROP TABLE IF EXISTS `teachers`;
 CREATE TABLE `teachers` (
-  `id` int(10) UNSIGNED NOT NULL,
+  `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT,
   `faculty_id` varchar(100) NOT NULL,
   `first_name` varchar(150) NOT NULL,
   `middle_initial` varchar(10) DEFAULT NULL,
@@ -4128,7 +4136,8 @@ CREATE TABLE `teachers` (
   `email` varchar(255) NOT NULL,
   `status` varchar(20) NOT NULL DEFAULT 'Active',
   `department` varchar(150) DEFAULT NULL,
-  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 --
@@ -4147,14 +4156,16 @@ INSERT INTO `teachers` (`id`, `faculty_id`, `first_name`, `middle_initial`, `las
 -- Table structure for table `teacher_schedules`
 --
 
+DROP TABLE IF EXISTS `teacher_schedules`;
 CREATE TABLE `teacher_schedules` (
-  `id` int(10) UNSIGNED NOT NULL,
+  `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT,
   `teacher_id` int(10) UNSIGNED NOT NULL,
   `subject` varchar(255) DEFAULT NULL,
   `subject_code` varchar(100) DEFAULT NULL,
   `time` varchar(100) DEFAULT NULL,
   `day` varchar(50) DEFAULT NULL,
-  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
@@ -4163,12 +4174,15 @@ CREATE TABLE `teacher_schedules` (
 -- Table structure for table `users`
 --
 
+DROP TABLE IF EXISTS `users`;
 CREATE TABLE `users` (
-  `id` int(11) NOT NULL,
+  `id` int(11) NOT NULL AUTO_INCREMENT,
   `username` varchar(50) NOT NULL,
   `password` varchar(255) NOT NULL,
   `role` varchar(20) DEFAULT 'teacher',
-  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `username` (`username`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
@@ -4178,146 +4192,6 @@ CREATE TABLE `users` (
 INSERT INTO `users` (`id`, `username`, `password`, `role`, `created_at`) VALUES
 (1, 'admin', 'admin123', 'admin', '2025-09-10 21:23:25'),
 (4, 'jhondoe12@gmail.com', 'teacher123', 'teacher', '2026-01-25 19:17:28');
-
---
--- Indexes for dumped tables
---
-
---
--- Indexes for table `attendance`
---
-ALTER TABLE `attendance`
-  ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `uniq_student_date` (`student_id`,`date`);
-
---
--- Indexes for table `curriculum`
---
-ALTER TABLE `curriculum`
-  ADD PRIMARY KEY (`id`);
-
---
--- Indexes for table `notification_logs`
---
-ALTER TABLE `notification_logs`
-  ADD PRIMARY KEY (`id`),
-  ADD KEY `idx_student_id` (`student_id`),
-  ADD KEY `idx_channel` (`channel`),
-  ADD KEY `idx_event_type` (`event_type`),
-  ADD KEY `idx_created_at` (`created_at`);
-
---
--- Indexes for table `recognition_logs`
---
-ALTER TABLE `recognition_logs`
-  ADD PRIMARY KEY (`id`);
-
---
--- Indexes for table `sections`
---
-ALTER TABLE `sections`
-  ADD PRIMARY KEY (`id`);
-
---
--- Indexes for table `sms_notifications`
---
-ALTER TABLE `sms_notifications`
-  ADD PRIMARY KEY (`id`),
-  ADD KEY `student_id` (`student_id`),
-  ADD KEY `event_type` (`event_type`),
-  ADD KEY `sent_at` (`sent_at`),
-  ADD KEY `idx_throttle` (`student_id`,`event_type`,`sent_at`);
-
---
--- Indexes for table `students`
---
-ALTER TABLE `students`
-  ADD PRIMARY KEY (`id`);
-
---
--- Indexes for table `teachers`
---
-ALTER TABLE `teachers`
-  ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `uk_faculty_id` (`faculty_id`);
-
---
--- Indexes for table `teacher_schedules`
---
-ALTER TABLE `teacher_schedules`
-  ADD PRIMARY KEY (`id`),
-  ADD KEY `idx_teacher` (`teacher_id`);
-
---
--- Indexes for table `users`
---
-ALTER TABLE `users`
-  ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `username` (`username`);
-
---
--- AUTO_INCREMENT for dumped tables
---
-
---
--- AUTO_INCREMENT for table `attendance`
---
-ALTER TABLE `attendance`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4326;
-
---
--- AUTO_INCREMENT for table `curriculum`
---
-ALTER TABLE `curriculum`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=8;
-
---
--- AUTO_INCREMENT for table `notification_logs`
---
-ALTER TABLE `notification_logs`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3798;
-
---
--- AUTO_INCREMENT for table `recognition_logs`
---
-ALTER TABLE `recognition_logs`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=15;
-
---
--- AUTO_INCREMENT for table `sections`
---
-ALTER TABLE `sections`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=19;
-
---
--- AUTO_INCREMENT for table `sms_notifications`
---
-ALTER TABLE `sms_notifications`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
-
---
--- AUTO_INCREMENT for table `students`
---
-ALTER TABLE `students`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=53;
-
---
--- AUTO_INCREMENT for table `teachers`
---
-ALTER TABLE `teachers`
-  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=5;
-
---
--- AUTO_INCREMENT for table `teacher_schedules`
---
-ALTER TABLE `teacher_schedules`
-  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
-
---
--- AUTO_INCREMENT for table `users`
---
-ALTER TABLE `users`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=5;
 
 --
 -- Constraints for dumped tables
