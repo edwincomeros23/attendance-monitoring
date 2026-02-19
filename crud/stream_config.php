@@ -2,7 +2,7 @@
 /**
  * stream_config.php
  * GET  → returns current stream URL config as JSON
- * POST → saves ngrok/stream URL to a local config file
+ * POST → saves tunnel/stream URL to a local config file
  */
 header('Content-Type: application/json; charset=utf-8');
 

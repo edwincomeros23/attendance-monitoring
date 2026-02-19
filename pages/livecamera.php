@@ -234,17 +234,17 @@ if ($year && $section) {
   <!-- diag hidden per user request -->
   <div id="diag" style="display:none;position:absolute;top:12px;right:160px;background:rgba(0,0,0,0.6);color:#fff;padding:6px 8px;border-radius:6px;z-index:4;font-size:13px">diag</div>
   <button id="reloadStreamBtn" class="manual-btn" style="position:absolute;top:12px;left:12px;z-index:3">Reload Stream</button>
-  <!-- ngrok URL config panel -->
-  <div id="ngrok-panel" style="position:absolute;top:50px;left:12px;z-index:5;background:rgba(0,0,0,0.75);border-radius:8px;padding:8px 10px;display:none;min-width:320px">
-    <div style="color:#fff;font-size:12px;margin-bottom:4px">📡 Stream URL (ngrok or local)</div>
+  <!-- Stream URL config panel -->
+  <div id="tunnel-panel" style="position:absolute;top:50px;left:12px;z-index:5;background:rgba(0,0,0,0.75);border-radius:8px;padding:8px 10px;display:none;min-width:320px">
+    <div style="color:#fff;font-size:12px;margin-bottom:4px">📡 Stream URL (Tunnel or Local)</div>
     <div style="display:flex;gap:6px;align-items:center">
-      <input id="ngrok-url-input" type="text" placeholder="https://xxxx.ngrok-free.app" style="flex:1;padding:5px 8px;border-radius:5px;border:none;font-size:12px;min-width:0" />
-      <button id="ngrok-save-btn" style="padding:5px 10px;background:#1976d2;color:#fff;border:none;border-radius:5px;font-size:12px;cursor:pointer;white-space:nowrap">Save & Reload</button>
-      <button id="ngrok-clear-btn" style="padding:5px 8px;background:#555;color:#fff;border:none;border-radius:5px;font-size:12px;cursor:pointer">Clear</button>
+      <input id="tunnel-url-input" type="text" placeholder="https://xxxx.trycloudflare.com" style="flex:1;padding:5px 8px;border-radius:5px;border:none;font-size:12px;min-width:0" />
+      <button id="tunnel-save-btn" style="padding:5px 10px;background:#1976d2;color:#fff;border:none;border-radius:5px;font-size:12px;cursor:pointer;white-space:nowrap">Save & Reload</button>
+      <button id="tunnel-clear-btn" style="padding:5px 8px;background:#555;color:#fff;border:none;border-radius:5px;font-size:12px;cursor:pointer">Clear</button>
     </div>
-    <div id="ngrok-status" style="color:#aaa;font-size:11px;margin-top:4px"></div>
+    <div id="tunnel-status" style="color:#aaa;font-size:11px;margin-top:4px"></div>
   </div>
-  <button id="ngrok-toggle-btn" class="manual-btn" style="position:absolute;top:50px;left:12px;z-index:4;font-size:11px;padding:4px 10px">⚙ Stream URL</button>
+  <button id="tunnel-toggle-btn" class="manual-btn" style="position:absolute;top:50px;left:12px;z-index:4;font-size:11px;padding:4px 10px">⚙ Stream URL</button>
 
   <button id="toggleCameraBtn">Turn Off Camera</button>
       </div>
@@ -595,10 +595,10 @@ if ($year && $section) {
       if (j && j.stream_url && j.stream_url.trim() !== '') {
         const base = j.stream_url.replace(/\/+$/, '');
         HLS_URL = `${base}/attendance-monitoring/stream/index.m3u8`;
-        document.getElementById('ngrok-url-input').value = j.stream_url;
+        document.getElementById('tunnel-url-input').value = j.stream_url;
         const debugUrlEl = document.getElementById('ngrok-debug-url');
         if (debugUrlEl) debugUrlEl.textContent = HLS_URL;
-        document.getElementById('ngrok-status').textContent = 'Saved URL loaded ✓';
+        document.getElementById('tunnel-status').textContent = 'Saved URL loaded ✓';
       }
     } catch(e) { console.warn('Could not load stream config', e); }
   }
@@ -743,9 +743,15 @@ if ($year && $section) {
 
       const url = HLS_URL + '?_=' + Date.now(); // cache-bust
       const isRemote = HLS_URL.startsWith('http') && !HLS_URL.includes(location.hostname);
+      const isCloudflare = HLS_URL.includes('trycloudflare.com') || HLS_URL.includes('cloudflare');
+      
       const sourceEl = document.getElementById('stream-source');
       if (sourceEl) {
-        sourceEl.textContent = isRemote ? 'SOURCE: NGROK' : 'SOURCE: LOCAL';
+        let label = 'SOURCE: LOCAL';
+        if (isCloudflare) label = 'SOURCE: CLOUDFLARE';
+        else if (isRemote) label = 'SOURCE: REMOTE';
+        
+        sourceEl.textContent = label;
         sourceEl.style.color = isRemote ? '#4ade80' : '#94a3b8';
       }
       console.log('--- startHls calling with url:', url);
@@ -766,8 +772,7 @@ if ($year && $section) {
           fragLoadingMaxRetry: 10,      // More retries for each fragment
           xhrSetup: function(xhr, url) { 
             xhr.withCredentials = false;
-            // Bypass ngrok browser warning
-            xhr.setRequestHeader('ngrok-skip-browser-warning', 'true');
+            // Add specific headers if needed for other providers
           }
         });
         hls.attachMedia(liveVideo);
@@ -901,29 +906,29 @@ if ($year && $section) {
 
     reloadBtn.addEventListener('click', () => startHls());
 
-    // ngrok panel toggle & save logic
-    const ngrokToggleBtn = document.getElementById('ngrok-toggle-btn');
-    const ngrokPanel = document.getElementById('ngrok-panel');
-    const ngrokSaveBtn = document.getElementById('ngrok-save-btn');
-    const ngrokClearBtn = document.getElementById('ngrok-clear-btn');
-    const ngrokInput = document.getElementById('ngrok-url-input');
-    const ngrokStatusEl = document.getElementById('ngrok-status');
-    const ngrokDebugUrl = document.createElement('div');
-    ngrokDebugUrl.id = 'ngrok-debug-url';
-    ngrokDebugUrl.style.fontSize = '10px';
-    ngrokDebugUrl.style.opacity = '0.7';
-    ngrokDebugUrl.style.marginTop = '4px';
-    ngrokDebugUrl.style.wordBreak = 'break-all';
-    ngrokStatusEl.parentNode.insertBefore(ngrokDebugUrl, ngrokStatusEl.nextSibling);
+    // Tunnel (Cloudflare/ngrok) panel toggle & save logic
+    const tunnelToggleBtn = document.getElementById('tunnel-toggle-btn');
+    const tunnelPanel = document.getElementById('tunnel-panel');
+    const tunnelSaveBtn = document.getElementById('tunnel-save-btn');
+    const tunnelClearBtn = document.getElementById('tunnel-clear-btn');
+    const tunnelInput = document.getElementById('tunnel-url-input');
+    const tunnelStatusEl = document.getElementById('tunnel-status');
+    const tunnelDebugUrl = document.createElement('div');
+    tunnelDebugUrl.id = 'tunnel-debug-url';
+    tunnelDebugUrl.style.fontSize = '10px';
+    tunnelDebugUrl.style.opacity = '0.7';
+    tunnelDebugUrl.style.marginTop = '4px';
+    tunnelDebugUrl.style.wordBreak = 'break-all';
+    tunnelStatusEl.parentNode.insertBefore(tunnelDebugUrl, tunnelStatusEl.nextSibling);
 
-    ngrokToggleBtn.addEventListener('click', () => {
-      const visible = ngrokPanel.style.display !== 'none';
-      ngrokPanel.style.display = visible ? 'none' : 'block';
+    tunnelToggleBtn.addEventListener('click', () => {
+      const visible = tunnelPanel.style.display !== 'none';
+      tunnelPanel.style.display = visible ? 'none' : 'block';
     });
 
-    ngrokSaveBtn.addEventListener('click', async () => {
-      const url = ngrokInput.value.trim();
-      ngrokStatusEl.textContent = 'Saving...';
+    tunnelSaveBtn.addEventListener('click', async () => {
+      const url = tunnelInput.value.trim();
+      tunnelStatusEl.textContent = 'Saving...';
       try {
         const res = await fetch('/attendance-monitoring/crud/stream_config.php', {
           method: 'POST',
@@ -938,54 +943,57 @@ if ($year && $section) {
           } else {
             HLS_URL = `${location.origin}/attendance-monitoring/stream/index.m3u8`;
           }
-          const debugUrlEl = document.getElementById('ngrok-debug-url');
+          const debugUrlEl = document.getElementById('tunnel-debug-url');
           if (debugUrlEl) debugUrlEl.textContent = HLS_URL;
-          ngrokStatusEl.textContent = url ? `Saved. Using: ${HLS_URL}` : 'Cleared. Using local stream.';
-          ngrokPanel.style.display = 'none';
+          tunnelStatusEl.textContent = url ? `Saved. Using: ${HLS_URL}` : 'Cleared. Using local stream.';
+          tunnelPanel.style.display = 'none';
           
           // FORCE CLEAN RESTART: stop old stream before starting new one
           try { if (hls) { hls.destroy(); hls = null; } } catch(e){}
           hlsStarted = false; 
           startHls();
         } else {
-          ngrokStatusEl.textContent = 'Error: ' + (j.error || 'Save failed');
+          tunnelStatusEl.textContent = 'Error: ' + (j.error || 'Save failed');
         }
       } catch(e) {
-        ngrokStatusEl.textContent = 'Network error';
+        tunnelStatusEl.textContent = 'Network error';
       }
     });
 
-    ngrokClearBtn.addEventListener('click', () => {
-      ngrokInput.value = '';
-      ngrokStatusEl.textContent = 'Cleared (press Save & Reload to apply)';
+    tunnelClearBtn.addEventListener('click', () => {
+      tunnelInput.value = '';
+      tunnelStatusEl.textContent = 'Cleared (press Save & Reload to apply)';
     });
 
     // start on load (but first check whether the HLS manifest exists)
     async function checkStreamStatus() {
-      // If HLS_URL is remote (ngrok), check it directly via browser fetch
+      // If HLS_URL is remote, check it directly via browser fetch
       const isRemote = HLS_URL.startsWith('http') && !HLS_URL.includes(location.hostname);
+      const isCloudflare = HLS_URL.includes('trycloudflare.com') || HLS_URL.includes('cloudflare');
       
       if (isRemote) {
         console.log('Checking remote stream status:', HLS_URL);
         try {
-          // Use GET request with bypass header
+          // Use GET request with bypass headers
           const res = await fetch(HLS_URL, { 
             method: 'GET', 
             cache: 'no-store',
-            headers: { 'ngrok-skip-browser-warning': 'true' }
+            headers: { 
+              'CF-Access-Client-Id': '', // placeholder for future Cloudflare Zero Trust
+              'CF-Access-Client-Secret': ''
+            }
           });
           if (res.ok) {
-            setStatus('Ngrok stream found, connecting...', 'rgba(0,128,0,0.8)');
+            setStatus(isCloudflare ? 'Cloudflare stream found, connecting...' : 'Remote stream found, connecting...', 'rgba(0,128,0,0.8)');
             startHls();
           } else {
-            console.warn('Ngrok stream returned:', res.status);
-            setStatus(`Ngrok Error ${res.status}`, 'rgba(128,0,0,0.8)');
+            console.warn('Remote stream returned:', res.status);
+            setStatus(`Remote Error ${res.status}`, 'rgba(128,0,0,0.8)');
           }
         } catch (err) {
-          console.error('Connection error to ngrok', err);
-          setStatus('Cannot reach ngrok tunnel', 'rgba(128,0,0,0.8)');
+          console.error('Connection error to remote tunnel', err);
+          setStatus('Cannot reach tunnel', 'rgba(128,0,0,0.8)');
         }
-        // IF WE HAVE A REMOTE URL, SKIP THE LOCAL CHECK ENTIRELY
         return;
       }
 
@@ -994,8 +1002,7 @@ if ($year && $section) {
         const res = await fetch('/attendance-monitoring/config/stream_status.php', { cache: 'no-store' });
         const j = await res.json();
         if (j && j.exists) {
-          console.log('Local manifest found.');
-          setStatus('Local manifest present, starting...', 'rgba(0,128,0,0.8)');
+          setStatus('Local manifest found, starting...', 'rgba(0,128,0,0.8)');
           startHls();
         } else {
           setStatus('Waiting for local stream...', 'rgba(128,0,0,0.8)');
@@ -1006,10 +1013,10 @@ if ($year && $section) {
       }
     }
 
-    // Load saved ngrok URL first, then start polling for stream
+    // Load saved tunnel URL first, then start polling for stream
     loadStreamConfig().then(() => {
       checkStreamStatus();
-      setInterval(checkStreamStatus, 2500);
+      setInterval(checkStreamStatus, 3000);
     });
 
 
