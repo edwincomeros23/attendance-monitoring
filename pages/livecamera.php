@@ -232,7 +232,7 @@ if ($year && $section) {
     <div id="stream-status" style="background:rgba(0,0,0,0.6);color:#fff;padding:6px 8px;border-radius:6px;font-size:13px">Connecting...</div>
   </div>
   <!-- diag hidden per user request -->
-  <div id="diag" style="display:none;position:absolute;top:12px;right:160px;background:rgba(0,0,0,0.6);color:#fff;padding:6px 8px;border-radius:6px;z-index:4;font-size:13px">diag</div>
+  <div id="diag" style="position:absolute;top:12px;right:180px;background:rgba(0,0,0,0.6);color:#fff;padding:6px 8px;border-radius:6px;z-index:4;font-size:11px">diag</div>
   <button id="reloadStreamBtn" class="manual-btn" style="position:absolute;top:12px;left:12px;z-index:3">Reload Stream</button>
   <!-- Stream URL config panel -->
   <div id="tunnel-panel" style="position:absolute;top:50px;left:12px;z-index:5;background:rgba(0,0,0,0.75);border-radius:8px;padding:8px 10px;display:none;min-width:320px">
@@ -1141,9 +1141,13 @@ if ($year && $section) {
         if (labeled.length > 0) {
           globalFaceMatcher = new faceapi.FaceMatcher(labeled, 0.5);
           console.log('Global descriptors loaded:', globalLabeledCount);
+          const diagEl = document.getElementById('diag');
+          if (diagEl) diagEl.textContent = `Matcher: Loaded ${globalLabeledCount} descriptors`;
         } else {
           globalFaceMatcher = null;
           console.log('No labeled descriptors found');
+          const diagEl = document.getElementById('diag');
+          if (diagEl) diagEl.textContent = `Matcher: None loaded (Unknown mode)`;
         }
         return { matcher: globalFaceMatcher, count: globalLabeledCount };
       }
