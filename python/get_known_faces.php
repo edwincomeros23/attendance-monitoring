@@ -3,6 +3,7 @@
 // Returns a JSON structure of known face images organized by label.
 // FIXED: Only loads training data for students in the currently selected section
 header('Content-Type: application/json; charset=utf-8');
+header('Access-Control-Allow-Origin: *');
 
 require_once __DIR__ . '/../db.php';
 
@@ -76,8 +77,8 @@ foreach (scandir($baseDir) as $label) {
         if (in_array($f, ['.', '..'])) continue;
         $ext = strtolower(pathinfo($f, PATHINFO_EXTENSION));
         if (!in_array($ext, ['jpg','jpeg','png'])) continue;
-        // Build a URL relative to the site root. Adjust if your site is mounted differently.
-        $url = '/attendance-monitoring/known_faces/' . rawurlencode($label) . '/' . rawurlencode($f);
+        // Build a URL relative to the project root.
+        $url = 'known_faces/' . rawurlencode($label) . '/' . rawurlencode($f);
         $files[] = $url;
     }
     if (count($files) > 0) {

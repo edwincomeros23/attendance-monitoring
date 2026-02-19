@@ -1073,12 +1073,24 @@ if ($year && $section) {
     // a recognition loop on the live video. Updates overlay canvas and the class log.
     async function loadLabeledDescriptors() {
       try {
+        // Calculate the base URL for fetching training faces.
+        // If we have a tunnel (HLS_URL is remote), we should fetch faces from the tunnel base
+        // because training images are likely stored locally, not on Render.
+        const isRemote = HLS_URL.startsWith('http') && !HLS_URL.includes(location.hostname);
+        let apiBase = '..'; 
+        if (isRemote) {
+          const lastIdx = HLS_URL.lastIndexOf('/stream/');
+          if (lastIdx !== -1) {
+            apiBase = HLS_URL.substring(0, lastIdx);
+          }
+        }
+
         // Pass current section context so only enrolled students' faces are loaded
         const params = new URLSearchParams({
           year: YEAR_LEVEL,
           section: SECTION_NAME
         });
-        const res = await fetch('../python/get_known_faces.php?' + params.toString(), {cache: 'no-store'});
+        const res = await fetch(apiBase + '/python/get_known_faces.php?' + params.toString(), {cache: 'no-store'});
         const j = await res.json();
         if (!j.ok) return [];
         const data = j.data;
@@ -1099,7 +1111,9 @@ if ($year && $section) {
           // Load all images in parallel for faster startup
           const results = await Promise.all(imgs.map(async url => {
             try {
-              const img = await faceapi.fetchImage(url);
+              // Prepend apiBase if the URL returned is relative
+              const fullUrl = (url.startsWith('http') || url.startsWith('/')) ? url : (apiBase + '/' + url);
+              const img = await faceapi.fetchImage(fullUrl);
               const detection = await faceapi.detectSingleFace(img, descriptorDetectorOptions).withFaceLandmarks().withFaceDescriptor();
               return (detection && detection.descriptor) ? detection.descriptor : null;
             } catch (e) {
