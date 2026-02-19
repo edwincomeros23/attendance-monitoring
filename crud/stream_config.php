@@ -25,12 +25,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $data = ['stream_url' => $url, 'updated_at' => date('c')];
-    if (@file_put_contents($configFile, json_encode($data, JSON_PRETTY_PRINT))) {
-        echo json_encode(['success' => true, 'stream_url' => $url]);
-    } else {
-        http_response_code(500);
-        echo json_encode(['success' => false, 'error' => 'Failed to write to ' . basename($configFile)]);
-    }
+    $written = @file_put_contents($configFile, json_encode($data, JSON_PRETTY_PRINT));
+    
+    echo json_encode([
+        'success' => $written !== false,
+        'stream_url' => $url,
+        'persistence' => $written !== false ? 'file' : 'skipped'
+    ]);
     exit;
 }
 

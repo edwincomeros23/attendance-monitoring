@@ -589,15 +589,31 @@ if ($year && $section) {
     try {
       const res = await fetch('../crud/stream_config.php', { cache: 'no-store' });
       const j = await res.json();
-      if (j && j.stream_url && j.stream_url.trim() !== '') {
-        const base = j.stream_url.replace(/\/+$/, '');
-        HLS_URL = `${base}${location.pathname.substring(0, location.pathname.lastIndexOf('/pages/'))}/stream/index.m3u8`;
-        document.getElementById('tunnel-url-input').value = j.stream_url;
-        const debugUrlEl = document.getElementById('ngrok-debug-url');
-        if (debugUrlEl) debugUrlEl.textContent = HLS_URL;
-        document.getElementById('tunnel-status').textContent = 'Saved URL loaded ✓';
+      let streamUrl = (j && j.stream_url) ? j.stream_url.trim() : '';
+      
+      // Fallback to localStorage if server has no URL (e.g. on Render)
+      if (!streamUrl) {
+        streamUrl = localStorage.getItem('fallback_tunnel_url') || '';
       }
-    } catch(e) { console.warn('Could not load stream config', e); }
+
+      if (streamUrl !== '') {
+        const base = streamUrl.replace(/\/+$/, '');
+        HLS_URL = `${base}${location.pathname.substring(0, location.pathname.lastIndexOf('/pages/'))}/stream/index.m3u8`;
+        document.getElementById('tunnel-url-input').value = streamUrl;
+        const debugUrlEl = document.getElementById('tunnel-debug-url');
+        if (debugUrlEl) debugUrlEl.textContent = HLS_URL;
+        document.getElementById('tunnel-status').textContent = j.success ? 'Saved URL loaded ✓' : 'Loaded from browser cache. (Server write restricted)';
+      }
+    } catch(e) { 
+      console.warn('Could not load stream config from server, checking local cache.', e);
+      const streamUrl = localStorage.getItem('fallback_tunnel_url') || '';
+      if (streamUrl) {
+         const base = streamUrl.replace(/\/+$/, '');
+         HLS_URL = `${base}${location.pathname.substring(0, location.pathname.lastIndexOf('/pages/'))}/stream/index.m3u8`;
+         document.getElementById('tunnel-url-input').value = streamUrl;
+         document.getElementById('tunnel-status').textContent = 'Loaded from browser cache.';
+      }
+    }
   }
     const statusEl = document.getElementById('stream-status');
     const reloadBtn = document.getElementById('reloadStreamBtn');
@@ -926,6 +942,17 @@ if ($year && $section) {
     tunnelSaveBtn.addEventListener('click', async () => {
       const url = tunnelInput.value.trim();
       tunnelStatusEl.textContent = 'Saving...';
+      
+      // Update locally immediately for best UX
+      if (url) {
+        const base = url.replace(/\/+$/, '');
+        HLS_URL = `${base}${location.pathname.substring(0, location.pathname.lastIndexOf('/pages/'))}/stream/index.m3u8`;
+        localStorage.setItem('fallback_tunnel_url', url);
+      } else {
+        HLS_URL = `${location.origin}${location.pathname.substring(0, location.pathname.lastIndexOf('/pages/'))}/stream/index.m3u8`;
+        localStorage.removeItem('fallback_tunnel_url');
+      }
+
       try {
         const res = await fetch('../crud/stream_config.php', {
           method: 'POST',
@@ -934,37 +961,32 @@ if ($year && $section) {
         });
         
         const rawText = await res.text();
-        let j;
-        try {
-          j = JSON.parse(rawText);
-        } catch (jsonErr) {
-          console.error('JSON Parse Error. Raw response:', rawText);
-          tunnelStatusEl.textContent = 'Server Error (HTML returned). Check Console.';
-          return;
-        }
+        let j = { success: false };
+        try { j = JSON.parse(rawText); } catch(e){}
 
+        const debugUrlEl = document.getElementById('tunnel-debug-url');
+        if (debugUrlEl) debugUrlEl.textContent = HLS_URL;
+        
         if (j.success) {
-          if (url) {
-            const base = url.replace(/\/+$/, '');
-            HLS_URL = `${base}${location.pathname.substring(0, location.pathname.lastIndexOf('/pages/'))}/stream/index.m3u8`;
-          } else {
-            HLS_URL = `${location.origin}${location.pathname.substring(0, location.pathname.lastIndexOf('/pages/'))}/stream/index.m3u8`;
-          }
-          const debugUrlEl = document.getElementById('tunnel-debug-url');
-          if (debugUrlEl) debugUrlEl.textContent = HLS_URL;
-          tunnelStatusEl.textContent = url ? `Saved. Using: ${HLS_URL}` : 'Cleared. Using local stream.';
+          tunnelStatusEl.textContent = url ? `Saved ✓` : 'Cleared ✓';
           tunnelPanel.style.display = 'none';
-          
-          // FORCE CLEAN RESTART: stop old stream before starting new one
-          try { if (hls) { hls.destroy(); hls = null; } } catch(e){}
-          hlsStarted = false; 
-          startHls();
         } else {
-          tunnelStatusEl.textContent = 'Error: ' + (j.error || 'Save failed');
+          // If server fails (Render write restriction), we still have it in HLS_URL and localStorage
+          tunnelStatusEl.textContent = url ? 'Applied (Session-only: Server write restricted)' : 'Cleared (Session-only)';
+          console.warn('Server save failed, using session-only mode:', rawText);
         }
+        
+        // FORCE CLEAN RESTART
+        try { if (hls) { hls.destroy(); hls = null; } } catch(e){}
+        hlsStarted = false; 
+        startHls();
       } catch(e) {
         console.error('Tunnel Save Fetch Error:', e);
-        tunnelStatusEl.textContent = 'Network error: ' + e.message;
+        // On network error, we still have it in HLS_URL and localStorage
+        tunnelStatusEl.textContent = 'Applied (Session-only: Network Error)';
+        try { if (hls) { hls.destroy(); hls = null; } } catch(err){}
+        hlsStarted = false; 
+        startHls();
       }
     });
 
