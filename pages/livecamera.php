@@ -227,7 +227,10 @@ if ($year && $section) {
   <canvas id="faceCrop" width="160" height="160" style="display:none;position:absolute;right:12px;top:12px;z-index:5;border-radius:8px;border:3px solid rgba(0,0,0,0.6);background:#000;box-shadow:0 6px 18px rgba(0,0,0,0.35);pointer-events:none"></canvas>
 
   <!-- Stream status and controls -->
-  <div id="stream-status" style="position:absolute;top:12px;right:12px;background:rgba(0,0,0,0.6);color:#fff;padding:6px 8px;border-radius:6px;z-index:3;font-size:13px">Connecting...</div>
+  <div id="stream-status-container" style="position:absolute;top:12px;right:12px;display:flex;flex-direction:column;align-items:flex-end;gap:4px;z-index:3">
+    <div id="stream-source" style="background:rgba(0,0,0,0.7);color:#94a3b8;padding:4px 8px;border-radius:4px;font-size:11px;font-weight:bold;letter-spacing:0.5px">SOURCE: LOCAL</div>
+    <div id="stream-status" style="background:rgba(0,0,0,0.6);color:#fff;padding:6px 8px;border-radius:6px;font-size:13px">Connecting...</div>
+  </div>
   <!-- diag hidden per user request -->
   <div id="diag" style="display:none;position:absolute;top:12px;right:160px;background:rgba(0,0,0,0.6);color:#fff;padding:6px 8px;border-radius:6px;z-index:4;font-size:13px">diag</div>
   <button id="reloadStreamBtn" class="manual-btn" style="position:absolute;top:12px;left:12px;z-index:3">Reload Stream</button>
@@ -739,6 +742,13 @@ if ($year && $section) {
       try { if (hls) { hls.destroy(); hls = null; } } catch (e) { console.warn(e); }
 
       const url = HLS_URL + '?_=' + Date.now(); // cache-bust
+      const isRemote = HLS_URL.startsWith('http') && !HLS_URL.includes(location.hostname);
+      const sourceEl = document.getElementById('stream-source');
+      if (sourceEl) {
+        sourceEl.textContent = isRemote ? 'SOURCE: NGROK' : 'SOURCE: LOCAL';
+        sourceEl.style.color = isRemote ? '#4ade80' : '#94a3b8';
+      }
+      console.log('--- startHls calling with url:', url);
 
       if (Hls.isSupported()) {
         // Optimized HLS config: larger buffer, longer timeouts, better error recovery
@@ -958,25 +968,24 @@ if ($year && $section) {
       if (isRemote) {
         console.log('Checking remote stream status:', HLS_URL);
         try {
-          // Use GET request to check if manifest exists on the ngrok tunnel (with bypass header)
+          // Use GET request with bypass header
           const res = await fetch(HLS_URL, { 
             method: 'GET', 
             cache: 'no-store',
             headers: { 'ngrok-skip-browser-warning': 'true' }
           });
           if (res.ok) {
-            setStatus('Remote manifest present, starting...', 'rgba(0,128,0,0.8)');
+            setStatus('Ngrok stream found, connecting...', 'rgba(0,128,0,0.8)');
             startHls();
           } else {
-            console.warn('Remote manifest check returned:', res.status);
-            setStatus('Remote stream not found (Check ngrok)', 'rgba(128,0,0,0.8)');
+            console.warn('Ngrok stream returned:', res.status);
+            setStatus(`Ngrok Error ${res.status}`, 'rgba(128,0,0,0.8)');
           }
         } catch (err) {
-          // If fetch fails (CORS), just try starting HLS anyway as a fallback
-          console.info('CORS/Connection error on status check, attempting load anyway', err);
-          setStatus('Connecting to remote stream...', 'rgba(0,128,0,0.8)');
-          startHls();
+          console.error('Connection error to ngrok', err);
+          setStatus('Cannot reach ngrok tunnel', 'rgba(128,0,0,0.8)');
         }
+        // IF WE HAVE A REMOTE URL, SKIP THE LOCAL CHECK ENTIRELY
         return;
       }
 
@@ -986,13 +995,13 @@ if ($year && $section) {
         const j = await res.json();
         if (j && j.exists) {
           console.log('Local manifest found.');
-          setStatus('Manifest present, starting stream...', 'rgba(0,128,0,0.8)');
+          setStatus('Local manifest present, starting...', 'rgba(0,128,0,0.8)');
           startHls();
         } else {
-          setStatus('No manifest yet — waiting (local)...', 'rgba(128,0,0,0.8)');
+          setStatus('Waiting for local stream...', 'rgba(128,0,0,0.8)');
         }
       } catch (err) {
-        console.warn('Stream status check failed', err);
+        console.warn('Local status check failed', err);
         setStatus('Status check failed', 'rgba(128,0,0,0.8)');
       }
     }
