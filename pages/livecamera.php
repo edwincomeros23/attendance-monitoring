@@ -37,34 +37,49 @@ if ($year && $section) {
   $section_raw = $section;
   $section_for_save = $section_name;
 
-  // Fetch schedule (time_in/time_out) for this grade/section - ONLY for today's day_of_week
-  $scheduleTimeIn = '-';
-  $scheduleTimeOut = '-';
+  // Fetch ALL schedules for today (grade/section or grade-only fallback)
+  $todaySchedules = [];
   $today = date('l');
 
-  // Try exact section + day match first (STRICT: day must match exactly)
-  if ($stmt = $conn->prepare("SELECT time_in, time_out FROM curriculum WHERE (grade_level = ? OR grade_level = ?) AND (section = ? OR section = ?) AND day_of_week = ? ORDER BY id DESC LIMIT 1")) {
+  // Query for section-specific subjects
+  if ($stmt = $conn->prepare("SELECT subject_name, time_in, time_out FROM curriculum WHERE (grade_level = ? OR grade_level = ?) AND (section = ? OR section = ?) AND day_of_week = ? ORDER BY time_in ASC")) {
     $stmt->bind_param('sssss', $year_level, $year, $section_name, $section_raw, $today);
     $stmt->execute();
     $res = $stmt->get_result();
-    if ($row = $res->fetch_assoc()) {
-      if (!empty($row['time_in'])) $scheduleTimeIn = date('g:i A', strtotime($row['time_in']));
-      if (!empty($row['time_out'])) $scheduleTimeOut = date('g:i A', strtotime($row['time_out']));
+    while ($row = $res->fetch_assoc()) {
+      $todaySchedules[] = [
+        'subject' => $row['subject_name'],
+        'time_in' => $row['time_in'],
+        'time_out' => $row['time_out'],
+        'time_in_fmt' => date('g:i A', strtotime($row['time_in'])),
+        'time_out_fmt' => date('g:i A', strtotime($row['time_out']))
+      ];
     }
     $stmt->close();
   }
 
-  // Fallback: any schedule for grade matching today's day (STRICT: no empty/null day matching)
-  if ($scheduleTimeIn === '-' && $stmt = $conn->prepare("SELECT time_in, time_out FROM curriculum WHERE (grade_level = ? OR grade_level = ?) AND day_of_week = ? ORDER BY id DESC LIMIT 1")) {
-    $stmt->bind_param('sss', $year_level, $year, $today);
-    $stmt->execute();
-    $res = $stmt->get_result();
-    if ($row = $res->fetch_assoc()) {
-      if (!empty($row['time_in'])) $scheduleTimeIn = date('g:i A', strtotime($row['time_in']));
-      if (!empty($row['time_out'])) $scheduleTimeOut = date('g:i A', strtotime($row['time_out']));
+  // Fallback: if no section-specific found, query for grade-level general subjects
+  if (empty($todaySchedules)) {
+    if ($stmt = $conn->prepare("SELECT subject_name, time_in, time_out FROM curriculum WHERE (grade_level = ? OR grade_level = ?) AND day_of_week = ? ORDER BY time_in ASC")) {
+      $stmt->bind_param('sss', $year_level, $year, $today);
+      $stmt->execute();
+      $res = $stmt->get_result();
+      while ($row = $res->fetch_assoc()) {
+        $todaySchedules[] = [
+          'subject' => $row['subject_name'],
+          'time_in' => $row['time_in'],
+          'time_out' => $row['time_out'],
+          'time_in_fmt' => date('g:i A', strtotime($row['time_in'])),
+          'time_out_fmt' => date('g:i A', strtotime($row['time_out']))
+        ];
+      }
+      $stmt->close();
     }
-    $stmt->close();
   }
+
+  // For compatibility with any legacy UI elements that expect a single value
+  $scheduleTimeIn = !empty($todaySchedules) ? $todaySchedules[0]['time_in_fmt'] : '-';
+  $scheduleTimeOut = !empty($todaySchedules) ? $todaySchedules[count($todaySchedules)-1]['time_out_fmt'] : '-';
 
   // Query students - fetch by section match first
   if ($stmt = $conn->prepare("SELECT id, student_id, full_name, section FROM students WHERE year_level = ? AND (section = ? OR section = ?) ORDER BY full_name")) {
@@ -360,28 +375,51 @@ if ($year && $section) {
     // Persistent class log storage (localStorage) - reset is driven by schedule end time
     const SECTION_NAME_STORAGE = <?php echo json_encode($section_for_save ?? ($section_name ?? '')); ?>;
     const CLASS_LOG_RESET_HOUR = 22; // 10pm
-    const SCHEDULE_TIME_IN_VALUE = <?php echo json_encode($scheduleTimeIn ?? ''); ?>;
-    const SCHEDULE_TIME_OUT_VALUE = <?php echo json_encode($scheduleTimeOut ?? ''); ?>;
+    const TODAY_SCHEDULES = <?php echo json_encode($todaySchedules ?? []); ?>;
     
-    // Determine if there's a schedule window and if current time is within it
-    function isWithinScheduleWindow() {
-      if (!SCHEDULE_TIME_IN_VALUE || SCHEDULE_TIME_IN_VALUE === '-' || 
-          !SCHEDULE_TIME_OUT_VALUE || SCHEDULE_TIME_OUT_VALUE === '-') {
-        return false;
-      }
-      
+    // Find which subject is currently active or recently ended
+    function getActiveSchedule() {
+      if (!TODAY_SCHEDULES || TODAY_SCHEDULES.length === 0) return null;
       const now = new Date();
-      const scheduleStart = parseScheduleTimeToday(SCHEDULE_TIME_IN_VALUE);
-      const scheduleEnd = parseScheduleTimeToday(SCHEDULE_TIME_OUT_VALUE);
+      // Add a 15-minute buffer before and after for "Active" status
+      const BUFFER_MS = 15 * 60 * 1000;
       
-      if (!scheduleStart || !scheduleEnd) return false;
-      
-      // Check if current time is within the schedule window
-      return now >= scheduleStart && now <= scheduleEnd;
+      let active = null;
+      TODAY_SCHEDULES.forEach(sch => {
+        const start = parseScheduleTimeToday(sch.time_in_fmt);
+        const end = parseScheduleTimeToday(sch.time_out_fmt);
+        if (start && end) {
+          // If we are currently inside the window (with buffer)
+          if (now >= new Date(start.getTime() - BUFFER_MS) && now <= new Date(end.getTime() + BUFFER_MS)) {
+            active = sch;
+          }
+        }
+      });
+      // Fallback: if not currently in a window, find the closest upcoming or passed one
+      if (!active) {
+        TODAY_SCHEDULES.forEach(sch => {
+          const start = parseScheduleTimeToday(sch.time_in_fmt);
+          if (start && start <= now) active = sch;
+        });
+      }
+      return active || TODAY_SCHEDULES[0]; // Default to first if none matched
     }
 
-    const hasScheduleWindow = !!(SCHEDULE_TIME_IN_VALUE && SCHEDULE_TIME_IN_VALUE !== '-' && 
-                                  SCHEDULE_TIME_OUT_VALUE && SCHEDULE_TIME_OUT_VALUE !== '-');
+    // Determine if there's a schedule window and if current time is within it
+    function isWithinScheduleWindow() {
+      if (!TODAY_SCHEDULES || TODAY_SCHEDULES.length === 0) return false;
+      const now = new Date();
+      const BUFFER_BEFORE = 30 * 60 * 1000; // 30 min before
+      const BUFFER_AFTER = 30 * 60 * 1000;  // 30 min after
+      
+      return TODAY_SCHEDULES.some(sch => {
+        const start = parseScheduleTimeToday(sch.time_in_fmt);
+        const end = parseScheduleTimeToday(sch.time_out_fmt);
+        return start && end && now >= new Date(start.getTime() - BUFFER_BEFORE) && now <= new Date(end.getTime() + BUFFER_AFTER);
+      });
+    }
+
+    const hasScheduleWindow = TODAY_SCHEDULES.length > 0;
 
     function getClassLogDateKey() {
       const now = new Date();
@@ -536,7 +574,7 @@ if ($year && $section) {
         if (data) {
           applyPersistedRow(row, data);
           if (data.status) statusMap[String(studentDbId)] = data.status;
-          if (data.time_in) firstSeenMap[String(studentDbId)] = Date.now();
+          if (data.time_in_ts) firstSeenMap[String(studentDbId)] = data.time_in_ts;
         }
       });
     }
@@ -545,6 +583,7 @@ if ($year && $section) {
   const TRACKER_SMOOTHING = 0.45; // 0..1, higher = faster tracking
   const TRACKER_MIN_ALPHA = 0.4;
   const TRACKER_HOLD_MS = 180; // keep last box briefly when detection drops
+  const LEFT_GRACE_PERIOD_MS = 5000; // 5 seconds grace before marking as Left
   const MIN_CONFIDENCE_THRESHOLD = 0.25; // minimum confidence to track a face (more permissive)
   // global matcher and labeled count so we can refresh descriptors without reload
   let globalFaceMatcher = null;
@@ -1290,7 +1329,9 @@ if ($year && $section) {
           return;
         }
 
-        // Auto-set time-out for all students with time-in when scheduled end time is reached
+        // Auto-set time-out for all students with time-in when the active subject's scheduled end time is reached
+        const activeSch = getActiveSchedule();
+        const scheduleEnd = activeSch ? parseScheduleTimeToday(activeSch.time_out_fmt) : null;
         if (scheduleEnd && Date.now() >= scheduleEnd.getTime()) {
           const classLog = document.getElementById('class-log');
           if (classLog) {
@@ -1301,7 +1342,7 @@ if ($year && $section) {
               const timeOutEl = row.querySelector('.time-out');
               // Only set time-out if student has time-in and time-out is still empty
               if (firstSeenMap[lookupId] && timeOutEl && timeOutEl.textContent === '-') {
-                const timeOutText = scheduleEnd.toLocaleTimeString();
+                const timeOutText = activeSch.time_out_fmt; // Use the exact scheduled end time string
                 timeOutEl.textContent = timeOutText;
                 // Persist the auto time-out
                 const status = statusMap[lookupId] || 'Present';
@@ -1477,17 +1518,36 @@ if ($year && $section) {
                 if (timeInEl) timeInEl.textContent = timeInText;
                 
                 const fts = firstSeenMap[sid];
+                const activeSch = getActiveSchedule();
+                const scheduleStart = activeSch ? parseScheduleTimeToday(activeSch.time_in_fmt) : null;
+                const scheduleEnd = activeSch ? parseScheduleTimeToday(activeSch.time_out_fmt) : null;
+                const lateCutoff = scheduleStart ? new Date(scheduleStart.getTime() + 25 * 60 * 1000) : null;
+                
                 const status = (lateCutoff && fts > lateCutoff.getTime()) ? 'Late' : 'Present';
                 statusMap[sid] = status;
                 
-                saveAttendanceUpdate(d.studentDbId, { status, timeInTs: fts });
-                persistAttendanceForStudent(d.studentDbId, { status, time_in: timeInText, remarks: status });
+                // Immediately set Time-Out to the scheduled end of this subject
+                const timeOutText = activeSch ? activeSch.time_out_fmt : '-';
+                const timeOutEl = row.querySelector('.time-out');
+                if (timeOutEl) timeOutEl.textContent = timeOutText;
+
+                // Update Remarks to Present/Late
+                const remarksCell = row.querySelector('td:nth-child(6)');
+                if (remarksCell) remarksCell.textContent = status;
+
+              saveAttendanceUpdate(d.studentDbId, { status, timeInTs: fts, timeOutTs: scheduleEnd ? scheduleEnd.getTime() : null });
+                persistAttendanceForStudent(d.studentDbId, { status, time_in: timeInText, time_in_ts: fts, time_out: timeOutText, remarks: status });
               }
               lastSeenMap[sid] = Date.now();
               const sCell = row.querySelector('td:nth-child(3)');
+              const rCell = row.querySelector('td:nth-child(6)');
               if (sCell) { 
                 sCell.textContent = statusMap[sid]; 
                 sCell.style.color = statusMap[sid] === 'Late' ? '#d97706' : 'green';
+              }
+              // Restore Present/Late remark if previously marked as Left
+              if (rCell && rCell.textContent === 'Left') {
+                rCell.textContent = statusMap[sid];
               }
             }
           }
@@ -1500,26 +1560,29 @@ if ($year && $section) {
             if (row) {
               const hasTimeIn = !!firstSeenMap[id];
               const timeOutEl = row.querySelector('.time-out');
-              let timeOutText = null;
-              if (hasTimeIn && timeOutEl && timeOutEl.textContent === '-') {
+                const activeSch = getActiveSchedule();
+                const scheduleEnd = activeSch ? parseScheduleTimeToday(activeSch.time_out_fmt) : null;
                 let timeOutTs = lastSeenMap[id] || Date.now();
                 if (scheduleEnd) timeOutTs = scheduleEnd.getTime();
-                timeOutText = new Date(timeOutTs).toLocaleTimeString();
-                timeOutEl.textContent = timeOutText;
-              }
-              const remarksCell = row.querySelector('td:nth-child(6)');
-              if (remarksCell && hasTimeIn && timeOutText) remarksCell.textContent = 'Left';
-              
-              const studentDbId = parseInt(id, 10);
-              if (hasTimeIn && !Number.isNaN(studentDbId)) {
-                let ts = lastSeenMap[id] || Date.now();
-                if (scheduleEnd) ts = scheduleEnd.getTime();
-                const status = statusMap[id] || 'Present';
-                saveAttendanceUpdate(studentDbId, { status, timeOutTs: ts });
-                if (timeOutText) persistAttendanceForStudent(studentDbId, { time_out: timeOutText, remarks: 'Left' });
+                
+                let timeOutText = activeSch ? activeSch.time_out_fmt : new Date(timeOutTs).toLocaleTimeString();
+                
+                const remarksCell = row.querySelector('td:nth-child(6)');
+                const timeSinceLastSeen = Date.now() - (lastSeenMap[id] || 0);
+                
+                if (remarksCell && hasTimeIn && timeSinceLastSeen > LEFT_GRACE_PERIOD_MS) {
+                   timeOutEl.textContent = timeOutText;
+                   remarksCell.textContent = 'Left';
+                }
+                
+                const studentDbId = parseInt(id, 10);
+                if (hasTimeIn && !Number.isNaN(studentDbId) && timeSinceLastSeen > LEFT_GRACE_PERIOD_MS) {
+                  const status = statusMap[id] || 'Present';
+                  saveAttendanceUpdate(studentDbId, { status, timeOutTs: timeOutTs });
+                  if (timeOutText) persistAttendanceForStudent(studentDbId, { time_out: timeOutText, remarks: 'Left' });
+                }
               }
             }
-          }
         });
         prevSeenLabels = new Set(processedLabels);
 
@@ -1639,7 +1702,7 @@ if ($year && $section) {
   // Extra aggressive removal: delete any button/anchor whose visible text
   // contains the word 'enroll' (case-insensitive). This runs after the page
   // load and also watches for later insertions.
-  (function(){
+  (function() {
     function removeEnrollButtons(root) {
       try {
         const sels = (root || document).querySelectorAll ? (root || document).querySelectorAll('button, a') : [];
