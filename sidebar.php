@@ -30,7 +30,7 @@ if (file_exists(__DIR__ . '/db.php')) {
 ?>
 <div class="sidebar">
   <div class="logo-container">
-    <img src="/attendance-monitoring/wmsulogo.jpeg" alt="WMSU Logo" class="wmsu-logo" />
+    <img src="/attendance-monitoring/wmsulogo_circular.png" alt="WMSU Logo" class="wmsu-logo" />
     <p class="school-year"><?php echo $sy; ?></p>
   </div>
   <style>

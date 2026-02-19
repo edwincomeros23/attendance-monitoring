@@ -56,6 +56,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>WMSU ILS Attendance Tracking</title>
+  <link rel="icon" type="image/png" href="../wmsulogo_circular.png">
   <style>
     * {
       box-sizing: border-box;

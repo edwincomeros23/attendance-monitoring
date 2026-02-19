@@ -24,13 +24,18 @@ body {
 }
 
 .wmsu-logo {
-  width: 100px;
-  height: 100px;
-  object-fit: contain;
+  width: 90px;
+  height: 90px;
+  object-fit: cover;
   border-radius: 50%;
   background: white;
-  padding: 5px;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  padding: 3px;
+  border: 3px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), inset 0 0 0 2px #fff;
+  transition: transform 0.3s ease;
+}
+.wmsu-logo:hover {
+  transform: scale(1.05);
 }
 
 .school-year {

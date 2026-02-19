@@ -1,4 +1,5 @@
 <?php
+date_default_timezone_set('Asia/Manila');
 require_once __DIR__ . '/../auth.php';
 require_once __DIR__ . '/../db.php';
 
@@ -117,6 +118,7 @@ if ($year && $section) {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Live Camera — WMSU Attendance Tracking</title>
+  <link rel="icon" type="image/png" href="../wmsulogo_circular.png">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
   <link rel="stylesheet" href="../style.css" />
   <style>
@@ -430,8 +432,18 @@ if ($year && $section) {
       return dateKey.toISOString().split('T')[0];
     }
 
-    // Keep a stable key per section/day so logs persist until schedule end clears them
-    const CLASS_LOG_STORAGE_KEY = 'classlog_' + SECTION_NAME_STORAGE + '_' + getClassLogDateKey();
+    function getSubjectId() {
+      const sch = getActiveSchedule();
+      if (!sch) return 'no_subject';
+      // Sanitize subject name and add start time for a unique key per class session
+      const name = (sch.subject || 'unknown').replace(/\s+/g, '_');
+      const time = (sch.time_in_fmt || '').replace(/[:\s]/g, '');
+      return `${name}_${time}`;
+    }
+
+    // Keep a stable key per section/day/subject so logs persist only for the current subject
+    let CLASS_LOG_STORAGE_KEY = 'classlog_' + SECTION_NAME_STORAGE + '_' + getClassLogDateKey() + '_' + getSubjectId();
+    let CURRENT_SUBJECT_ID = getSubjectId();
 
     // Load persisted class log data from localStorage
     function loadPersistedClassLog() {
@@ -1355,6 +1367,21 @@ if ($year && $section) {
             subjectResetDone = true;
             resetClassLogForSubject();
           }
+        }
+
+        // --- SUBJECT TRANSITION DETECTION ---
+        const newSubjectId = getSubjectId();
+        if (newSubjectId !== CURRENT_SUBJECT_ID) {
+          console.log(`Subject transition detected: ${CURRENT_SUBJECT_ID} -> ${newSubjectId}`);
+          CURRENT_SUBJECT_ID = newSubjectId;
+          CLASS_LOG_STORAGE_KEY = 'classlog_' + SECTION_NAME_STORAGE + '_' + getClassLogDateKey() + '_' + CURRENT_SUBJECT_ID;
+          
+          // Clear current session data
+          resetClassLogForSubject();
+          
+          // Load new subject's data from storage
+          persistedAttendance = loadPersistedClassLog();
+          applyPersistedClassLog();
         }
 
         detectBusy = true;

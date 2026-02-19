@@ -218,6 +218,7 @@ if (isset($_GET['print_attendance'])) {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Attendance Record - <?php echo $studentName; ?></title>
+    <link rel="icon" type="image/png" href="../wmsulogo_circular.png">
     <style>
       body { font-family: Arial, sans-serif; margin: 24px; color: #222; }
       h1 { font-size: 20px; margin: 0 0 6px 0; }
@@ -290,6 +291,7 @@ if (isset($_GET['print_attendance'])) {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Students in <?php echo htmlspecialchars($section); ?> — WMSU Attendance Tracking</title>
+  <link rel="icon" type="image/png" href="../wmsulogo_circular.png">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
   <link rel="stylesheet" href="../style.css" />
   <style>
