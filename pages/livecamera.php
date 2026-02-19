@@ -205,7 +205,7 @@ if ($year && $section) {
         }
       ?>
       <div class="header-actions">
-        <a href="/attendance-monitoring/pages/notifications.php" class="notif-btn" aria-label="Notifications" title="Notifications">
+        <a href="notifications.php" class="notif-btn" aria-label="Notifications" title="Notifications">
           <svg width="18" height="18" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
             <path d="M15 17H9a3 3 0 0 0 6 0z" fill="#ffffff"/>
             <path d="M18 8a6 6 0 1 0-12 0v4l-2 2v1h16v-1l-2-2V8z" fill="#ffffff"/>
@@ -583,18 +583,15 @@ if ($year && $section) {
 
   // simulated scanner disabled
 
-  // HLS.js to play .m3u8 stream in browsers with retry/cache-bust
-  // NOTE: point this at the HLS output inside your XAMPP htdocs folder so Apache can serve it.
-  // We'll use a path relative to the site: /attendance-monitoring/stream/index.m3u8
-  // HLS stream URL — loaded from server config (supports ngrok override)
-  let HLS_URL = `${location.origin}/attendance-monitoring/stream/index.m3u8`;
+  // HLS stream URL — loaded from server config (supports tunnel override)
+  let HLS_URL = `${location.origin}${location.pathname.substring(0, location.pathname.lastIndexOf('/pages/'))}/stream/index.m3u8`;
   async function loadStreamConfig() {
     try {
-      const res = await fetch('/attendance-monitoring/crud/stream_config.php', { cache: 'no-store' });
+      const res = await fetch('../crud/stream_config.php', { cache: 'no-store' });
       const j = await res.json();
       if (j && j.stream_url && j.stream_url.trim() !== '') {
         const base = j.stream_url.replace(/\/+$/, '');
-        HLS_URL = `${base}/attendance-monitoring/stream/index.m3u8`;
+        HLS_URL = `${base}${location.pathname.substring(0, location.pathname.lastIndexOf('/pages/'))}/stream/index.m3u8`;
         document.getElementById('tunnel-url-input').value = j.stream_url;
         const debugUrlEl = document.getElementById('ngrok-debug-url');
         if (debugUrlEl) debugUrlEl.textContent = HLS_URL;
@@ -649,7 +646,7 @@ if ($year && $section) {
     attendanceSaveCache[studentDbId] = cacheKey;
 
     try {
-      await fetch('/attendance-monitoring/crud/save_manual_attendance.php', {
+      await fetch('../crud/save_manual_attendance.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams(payload)
@@ -657,7 +654,7 @@ if ($year && $section) {
       
       // Send SMS notification - determine event type based on which timestamp is present
       const eventType = timeInTs ? 'time_in' : (timeOutTs ? 'time_out' : 'time_in');
-      fetch('/attendance-monitoring/crud/send_sms_notification.php', {
+      fetch('../crud/send_sms_notification.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
@@ -686,7 +683,7 @@ if ($year && $section) {
 
     async function saveVerification(predictedId, actualId) {
       try {
-        const res = await fetch('/attendance-monitoring/crud/save_recognition_log.php', {
+        const res = await fetch('../crud/save_recognition_log.php', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({
@@ -930,7 +927,7 @@ if ($year && $section) {
       const url = tunnelInput.value.trim();
       tunnelStatusEl.textContent = 'Saving...';
       try {
-        const res = await fetch('/attendance-monitoring/crud/stream_config.php', {
+        const res = await fetch('../crud/stream_config.php', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({ stream_url: url })
@@ -939,9 +936,9 @@ if ($year && $section) {
         if (j.success) {
           if (url) {
             const base = url.replace(/\/+$/, '');
-            HLS_URL = `${base}/attendance-monitoring/stream/index.m3u8`;
+            HLS_URL = `${base}${location.pathname.substring(0, location.pathname.lastIndexOf('/pages/'))}/stream/index.m3u8`;
           } else {
-            HLS_URL = `${location.origin}/attendance-monitoring/stream/index.m3u8`;
+            HLS_URL = `${location.origin}${location.pathname.substring(0, location.pathname.lastIndexOf('/pages/'))}/stream/index.m3u8`;
           }
           const debugUrlEl = document.getElementById('tunnel-debug-url');
           if (debugUrlEl) debugUrlEl.textContent = HLS_URL;
@@ -956,7 +953,8 @@ if ($year && $section) {
           tunnelStatusEl.textContent = 'Error: ' + (j.error || 'Save failed');
         }
       } catch(e) {
-        tunnelStatusEl.textContent = 'Network error';
+        console.error('Tunnel Save Error:', e);
+        tunnelStatusEl.textContent = 'Network error: ' + e.message;
       }
     });
 
@@ -999,7 +997,7 @@ if ($year && $section) {
 
       // Local check for default stream
       try {
-        const res = await fetch('/attendance-monitoring/config/stream_status.php', { cache: 'no-store' });
+        const res = await fetch('../config/stream_status.php', { cache: 'no-store' });
         const j = await res.json();
         if (j && j.exists) {
           setStatus('Local manifest found, starting...', 'rgba(0,128,0,0.8)');
@@ -1022,14 +1020,14 @@ if ($year && $section) {
 
 
     async function loadModels() {
-      await faceapi.nets.tinyFaceDetector.loadFromUri('/attendance-monitoring/models');
+      await faceapi.nets.tinyFaceDetector.loadFromUri('../models');
       detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 608, scoreThreshold: 0.15 });
       descriptorDetectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 608, scoreThreshold: 0.15 });
       detectionWidth = 704;
       activeDetector = 'tiny';
 
-      await faceapi.nets.faceLandmark68Net.loadFromUri('/attendance-monitoring/models');
-      await faceapi.nets.faceRecognitionNet.loadFromUri('/attendance-monitoring/models');
+      await faceapi.nets.faceLandmark68Net.loadFromUri('../models');
+      await faceapi.nets.faceRecognitionNet.loadFromUri('../models');
     }
 
     const modelsReadyPromise = loadModels();
@@ -1052,7 +1050,7 @@ if ($year && $section) {
           year: YEAR_LEVEL,
           section: SECTION_NAME
         });
-        const res = await fetch('/attendance-monitoring/python/get_known_faces.php?' + params.toString(), {cache: 'no-store'});
+        const res = await fetch('../python/get_known_faces.php?' + params.toString(), {cache: 'no-store'});
         const j = await res.json();
         if (!j.ok) return [];
         const data = j.data;
@@ -1534,7 +1532,7 @@ if ($year && $section) {
 
       for (const payload of toSubmit) {
         try {
-          const res = await fetch('/attendance-monitoring/crud/save_manual_attendance.php', {
+          const res = await fetch('../crud/save_manual_attendance.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams(payload)
