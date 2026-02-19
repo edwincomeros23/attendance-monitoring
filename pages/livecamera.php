@@ -932,7 +932,17 @@ if ($year && $section) {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({ stream_url: url })
         });
-        const j = await res.json();
+        
+        const rawText = await res.text();
+        let j;
+        try {
+          j = JSON.parse(rawText);
+        } catch (jsonErr) {
+          console.error('JSON Parse Error. Raw response:', rawText);
+          tunnelStatusEl.textContent = 'Server Error (HTML returned). Check Console.';
+          return;
+        }
+
         if (j.success) {
           if (url) {
             const base = url.replace(/\/+$/, '');
@@ -953,7 +963,7 @@ if ($year && $section) {
           tunnelStatusEl.textContent = 'Error: ' + (j.error || 'Save failed');
         }
       } catch(e) {
-        console.error('Tunnel Save Error:', e);
+        console.error('Tunnel Save Fetch Error:', e);
         tunnelStatusEl.textContent = 'Network error: ' + e.message;
       }
     });

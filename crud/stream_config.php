@@ -1,9 +1,6 @@
 <?php
-/**
- * stream_config.php
- * GET  → returns current stream URL config as JSON
- * POST → saves tunnel/stream URL to a local config file
- */
+date_default_timezone_set('Asia/Manila');
+error_reporting(0);
 header('Content-Type: application/json; charset=utf-8');
 
 $configFile = __DIR__ . '/../config/stream_url.json';
@@ -16,9 +13,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         echo json_encode(['success' => false, 'error' => 'Invalid URL']);
         exit;
     }
+
+    // Ensure config directory exists
+    $configDir = dirname($configFile);
+    if (!is_dir($configDir)) {
+        if (!@mkdir($configDir, 0777, true)) {
+            http_response_code(500);
+            echo json_encode(['success' => false, 'error' => 'Cannot create config directory']);
+            exit;
+        }
+    }
+
     $data = ['stream_url' => $url, 'updated_at' => date('c')];
-    file_put_contents($configFile, json_encode($data, JSON_PRETTY_PRINT));
-    echo json_encode(['success' => true, 'stream_url' => $url]);
+    if (@file_put_contents($configFile, json_encode($data, JSON_PRETTY_PRINT))) {
+        echo json_encode(['success' => true, 'stream_url' => $url]);
+    } else {
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => 'Failed to write to ' . basename($configFile)]);
+    }
     exit;
 }
 
