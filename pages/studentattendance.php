@@ -1,4 +1,9 @@
 <?php
+session_start();
+if (!isset($_SESSION["user_id"])) {
+    header("Location: /attendance-monitoring/auth/signin.php");
+    exit;
+}
 include '../db.php';
 
 $section = isset($_GET['section']) ? trim($_GET['section']) : '';

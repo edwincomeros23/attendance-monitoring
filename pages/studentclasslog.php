@@ -1,4 +1,9 @@
 <?php
+session_start();
+if (!isset($_SESSION["user_id"])) {
+    header("Location: /attendance-monitoring/auth/signin.php");
+    exit;
+}
 require_once '../db.php';
 
 // Inputs
