@@ -593,6 +593,8 @@ if ($year && $section) {
         const base = j.stream_url.replace(/\/+$/, '');
         HLS_URL = `${base}/attendance-monitoring/stream/index.m3u8`;
         document.getElementById('ngrok-url-input').value = j.stream_url;
+        const debugUrlEl = document.getElementById('ngrok-debug-url');
+        if (debugUrlEl) debugUrlEl.textContent = HLS_URL;
         document.getElementById('ngrok-status').textContent = 'Saved URL loaded ✓';
       }
     } catch(e) { console.warn('Could not load stream config', e); }
@@ -751,8 +753,12 @@ if ($year && $section) {
           autoStartLoad: true,
           startLevel: -1,               // Auto-select quality
           fragLoadingTimeOut: 30000,    // Increase timeout to 30 sec (was 20)
-          fragLoadingMaxRetry: 8,       // More retries for each fragment
-          xhrSetup: function(xhr, url) { xhr.withCredentials = false; }
+          fragLoadingMaxRetry: 10,      // More retries for each fragment
+          xhrSetup: function(xhr, url) { 
+            xhr.withCredentials = false;
+            // Bypass ngrok browser warning
+            xhr.setRequestHeader('ngrok-skip-browser-warning', 'true');
+          }
         });
         hls.attachMedia(liveVideo);
         hls.on(Hls.Events.MEDIA_ATTACHED, function() {
@@ -892,6 +898,13 @@ if ($year && $section) {
     const ngrokClearBtn = document.getElementById('ngrok-clear-btn');
     const ngrokInput = document.getElementById('ngrok-url-input');
     const ngrokStatusEl = document.getElementById('ngrok-status');
+    const ngrokDebugUrl = document.createElement('div');
+    ngrokDebugUrl.id = 'ngrok-debug-url';
+    ngrokDebugUrl.style.fontSize = '10px';
+    ngrokDebugUrl.style.opacity = '0.7';
+    ngrokDebugUrl.style.marginTop = '4px';
+    ngrokDebugUrl.style.wordBreak = 'break-all';
+    ngrokStatusEl.parentNode.insertBefore(ngrokDebugUrl, ngrokStatusEl.nextSibling);
 
     ngrokToggleBtn.addEventListener('click', () => {
       const visible = ngrokPanel.style.display !== 'none';
@@ -915,6 +928,8 @@ if ($year && $section) {
           } else {
             HLS_URL = `${location.origin}/attendance-monitoring/stream/index.m3u8`;
           }
+          const debugUrlEl = document.getElementById('ngrok-debug-url');
+          if (debugUrlEl) debugUrlEl.textContent = HLS_URL;
           ngrokStatusEl.textContent = url ? `Saved. Using: ${HLS_URL}` : 'Cleared. Using local stream.';
           ngrokPanel.style.display = 'none';
           
@@ -943,8 +958,12 @@ if ($year && $section) {
       if (isRemote) {
         console.log('Checking remote stream status:', HLS_URL);
         try {
-          // Use HEAD request to check if manifest exists on the ngrok tunnel
-          const res = await fetch(HLS_URL, { method: 'HEAD', cache: 'no-store' });
+          // Use GET request to check if manifest exists on the ngrok tunnel (with bypass header)
+          const res = await fetch(HLS_URL, { 
+            method: 'GET', 
+            cache: 'no-store',
+            headers: { 'ngrok-skip-browser-warning': 'true' }
+          });
           if (res.ok) {
             setStatus('Remote manifest present, starting...', 'rgba(0,128,0,0.8)');
             startHls();
