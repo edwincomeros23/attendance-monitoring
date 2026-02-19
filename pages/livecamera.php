@@ -1007,11 +1007,7 @@ if ($year && $section) {
           // Use GET request with bypass headers
           const res = await fetch(HLS_URL, { 
             method: 'GET', 
-            cache: 'no-store',
-            headers: { 
-              'CF-Access-Client-Id': '', // placeholder for future Cloudflare Zero Trust
-              'CF-Access-Client-Secret': ''
-            }
+            cache: 'no-store'
           });
           if (res.ok) {
             setStatus(isCloudflare ? 'Cloudflare stream found, connecting...' : 'Remote stream found, connecting...', 'rgba(0,128,0,0.8)');
@@ -1189,7 +1185,7 @@ if ($year && $section) {
       return local;
     }
     try {
-      const res = await fetch('/attendance-monitoring/get_student_info.php?student_id=' + encodeURIComponent(key), {cache: 'no-store'});
+      const res = await fetch('../get_student_info.php?student_id=' + encodeURIComponent(key), {cache: 'no-store'});
       const j = await res.json();
       if (j && j.ok && j.student) {
         studentInfoCache[key] = j.student;
