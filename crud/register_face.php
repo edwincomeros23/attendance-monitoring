@@ -1,5 +1,6 @@
-<?php
+error_reporting(0);
 header('Content-Type: application/json');
+
 // Accepts JSON body: { student_db_id: "123", student_id: "S123", student_name: "John Doe", images: ["data:image/jpeg;base64,...", ...] }
 $body = @file_get_contents('php://input');
 if (!$body) {
@@ -35,10 +36,15 @@ if ($safeName) {
 }
 $dir = __DIR__ . '/../known_faces/' . $folderName;
 if (!is_dir($dir)) {
-  if (!mkdir($dir, 0755, true)) {
-    echo json_encode(['success'=>false,'message'=>'Failed to create dir']);
+  if (!@mkdir($dir, 0755, true)) {
+    echo json_encode(['success'=>false,'message'=>'Server write restricted (Render). Registration skipped.']);
     exit;
   }
+}
+
+if (!is_writable($dir)) {
+    echo json_encode(['success'=>false,'message'=>'Directory is not writable (Render). Registration skipped.']);
+    exit;
 }
 $saved = [];
 $idx = 0;

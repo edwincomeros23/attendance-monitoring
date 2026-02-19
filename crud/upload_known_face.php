@@ -1,7 +1,4 @@
-<?php
-// Handles manual upload of a known face image for a student
-// Saves to known_faces/S_<id>_<Name>/...
-
+error_reporting(0);
 header('Content-Type: application/json');
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -35,7 +32,12 @@ if (empty($lookupId) && $studentId <= 0) {
 // Sanitize name for directory
 $safeName = preg_replace('/[^a-zA-Z0-9_\-]/', '_', $fullName);
 $baseDir = __DIR__ . '/../known_faces';
-if (!is_dir($baseDir)) mkdir($baseDir, 0755, true);
+if (!is_dir($baseDir)) {
+    if (!@mkdir($baseDir, 0755, true)) {
+        echo json_encode(['success' => false, 'message' => 'Server write restricted (Render). Upload skipped.']);
+        exit;
+    }
+}
 
 $targetDir = '';
 $existingDirs = glob($baseDir . "/S_no{$lookupId}_*");
@@ -48,10 +50,15 @@ if ($existingDirs && count($existingDirs) > 0) {
 }
 
 if (!is_dir($targetDir)) {
-    if (!mkdir($targetDir, 0755, true)) {
-        echo json_encode(['success' => false, 'message' => 'Failed to create directory']);
+    if (!@mkdir($targetDir, 0755, true)) {
+        echo json_encode(['success' => false, 'message' => 'Server write restricted (Render). Upload skipped.']);
         exit;
     }
+}
+
+if (!is_writable($targetDir)) {
+    echo json_encode(['success' => false, 'message' => 'Directory is not writable (Render). Upload skipped.']);
+    exit;
 }
 
 $file = $_FILES['photo'];
