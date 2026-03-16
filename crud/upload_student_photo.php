@@ -1,3 +1,4 @@
+<?php
 error_reporting(0);
 header('Content-Type: application/json');
 try {
@@ -29,7 +30,7 @@ try {
     // attempt to update DB; ignore errors but include in response if needed
     try {
       include __DIR__ . '/../db.php';
-      $stmt = $conn->prepare("UPDATE students SET photo1 = ? WHERE id = ? LIMIT 1");
+      $stmt = $conn->prepare("UPDATE students SET photo1 = ? WHERE id = ? AND deleted_at IS NULL LIMIT 1");
       if ($stmt) {
         $stmt->bind_param('si', $webPath, $sid);
         $stmt->execute();

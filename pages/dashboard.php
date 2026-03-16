@@ -94,7 +94,7 @@ if (isset($conn)) {
 if (isset($conn)) {
     // Distinct year levels
     if ($hasSchoolYearStudents && $schoolYear !== '') {
-        $stmt = $conn->prepare("SELECT COUNT(DISTINCT year_level) AS cnt FROM students WHERE school_year = ?");
+        $stmt = $conn->prepare("SELECT COUNT(DISTINCT year_level) AS cnt FROM students WHERE school_year = ? AND deleted_at IS NULL");
         if ($stmt) {
             $stmt->bind_param('s', $schoolYear);
             $stmt->execute();
@@ -102,7 +102,7 @@ if (isset($conn)) {
             if ($row = $res->fetch_assoc()) $total_year_levels = (int)$row['cnt'];
             $stmt->close();
         }
-    } else if ($res = $conn->query("SELECT COUNT(DISTINCT year_level) AS cnt FROM students")) {
+    } else if ($res = $conn->query("SELECT COUNT(DISTINCT year_level) AS cnt FROM students WHERE deleted_at IS NULL")) {
         $row = $res->fetch_assoc();
         $total_year_levels = isset($row['cnt']) ? (int)$row['cnt'] : 0;
         $res->free();
@@ -288,7 +288,7 @@ function get_total_students($conn, $schoolYear, $hasSchoolYearStudents) {
     if (!$conn) return 0;
     $total = 0;
     if ($hasSchoolYearStudents && $schoolYear !== '') {
-        $stmt = $conn->prepare("SELECT COUNT(*) AS cnt FROM students WHERE school_year = ?");
+        $stmt = $conn->prepare("SELECT COUNT(*) AS cnt FROM students WHERE school_year = ? AND deleted_at IS NULL");
         if ($stmt) {
             $stmt->bind_param('s', $schoolYear);
             $stmt->execute();
@@ -297,7 +297,7 @@ function get_total_students($conn, $schoolYear, $hasSchoolYearStudents) {
             $stmt->close();
         }
     } else {
-        if ($res = $conn->query("SELECT COUNT(*) AS cnt FROM students")) {
+        if ($res = $conn->query("SELECT COUNT(*) AS cnt FROM students WHERE deleted_at IS NULL")) {
             $row = $res->fetch_assoc();
             $total = isset($row['cnt']) ? (int)$row['cnt'] : 0;
             $res->free();

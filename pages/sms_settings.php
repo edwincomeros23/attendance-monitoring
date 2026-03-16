@@ -57,7 +57,7 @@ $statsQuery = "SELECT COUNT(*) as total, SUM(CASE WHEN status = 'sent' THEN 1 EL
 $statsResult = $conn->query($statsQuery);
 $stats = $statsResult ? $statsResult->fetch_assoc() : ['total' => 0, 'sent' => 0, 'failed' => 0];
 
-$recentQuery = "SELECT nl.*, s.full_name, s.student_id FROM notification_logs nl LEFT JOIN students s ON nl.student_id = s.id ORDER BY nl.created_at DESC LIMIT 15";
+$recentQuery = "SELECT nl.*, s.full_name, s.student_id FROM notification_logs nl LEFT JOIN students s ON nl.student_id = s.id AND s.deleted_at IS NULL ORDER BY nl.created_at DESC LIMIT 15";
 $recentResult = $conn->query($recentQuery);
 ?>
 <!DOCTYPE html>

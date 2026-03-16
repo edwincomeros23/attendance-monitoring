@@ -247,7 +247,7 @@ $headerYear = $yearLevel !== '' ? htmlspecialchars($yearLevel) : '';
         $studentsRes = false;
         $haveFilters = ($yearLevel !== '' && $sectionName !== '');
         if ($haveFilters) {
-          $studentsSql = "SELECT * FROM students WHERE year_level = ? AND section = ? ORDER BY section, full_name";
+          $studentsSql = "SELECT * FROM students WHERE year_level = ? AND section = ? AND deleted_at IS NULL ORDER BY section, full_name";
           $stmt = $conn->prepare($studentsSql);
           if ($stmt) {
             $stmt->bind_param('ss', $yearLevel, $sectionName);

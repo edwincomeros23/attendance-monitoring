@@ -178,7 +178,7 @@ function sendAttendanceNotification($studentId, $studentName, $studentIdNumber, 
     }
     
     // Get student phone number
-    $stmt = $conn->prepare("SELECT phone_no FROM students WHERE id = ?");
+    $stmt = $conn->prepare("SELECT phone_no FROM students WHERE id = ? AND deleted_at IS NULL");
     $stmt->bind_param("i", $studentId);
     $stmt->execute();
     $result = $stmt->get_result();

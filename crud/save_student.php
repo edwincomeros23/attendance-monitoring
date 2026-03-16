@@ -47,7 +47,7 @@ if (empty($fields)) {
     exit;
 }
 
-$sql = 'UPDATE students SET ' . implode(', ', $fields) . ' WHERE id = ? LIMIT 1';
+$sql = 'UPDATE students SET ' . implode(', ', $fields) . ' WHERE id = ? AND deleted_at IS NULL LIMIT 1';
 $types .= 'i';
 $values[] = $id;
 

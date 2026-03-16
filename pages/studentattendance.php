@@ -11,7 +11,7 @@ $section = isset($_GET['section']) ? trim($_GET['section']) : '';
 // simple fetch of students in the given section
 $students = [];
 if ($section) {
-    $stmt = $conn->prepare("SELECT id, student_id, full_name, year_level FROM students WHERE section = ? ORDER BY full_name ASC");
+    $stmt = $conn->prepare("SELECT id, student_id, full_name, year_level FROM students WHERE section = ? AND deleted_at IS NULL ORDER BY full_name ASC");
     $stmt->bind_param('s', $section);
     $stmt->execute();
     $res = $stmt->get_result();

@@ -10,7 +10,7 @@ require_once '../db.php';
 $notifications = [];
 $sql = "SELECT nl.student_id, nl.channel, nl.event_type, nl.status, nl.created_at, s.full_name, s.student_id AS student_code
     FROM notification_logs nl
-    LEFT JOIN students s ON nl.student_id = s.id
+    LEFT JOIN students s ON nl.student_id = s.id AND s.deleted_at IS NULL
     ORDER BY nl.created_at DESC";
 if ($res = $conn->query($sql)) {
   while ($row = $res->fetch_assoc()) {

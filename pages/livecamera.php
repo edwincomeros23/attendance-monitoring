@@ -83,7 +83,7 @@ if ($year && $section) {
   $scheduleTimeOut = !empty($todaySchedules) ? $todaySchedules[count($todaySchedules)-1]['time_out_fmt'] : '-';
 
   // Query students - fetch by section match first
-  if ($stmt = $conn->prepare("SELECT id, student_id, full_name, section FROM students WHERE year_level = ? AND (section = ? OR section = ?) ORDER BY full_name")) {
+  if ($stmt = $conn->prepare("SELECT id, student_id, full_name, section FROM students WHERE year_level = ? AND (section = ? OR section = ?) AND deleted_at IS NULL ORDER BY full_name")) {
     $stmt->bind_param('sss', $year_level, $section_name, $section_raw);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -97,7 +97,7 @@ if ($year && $section) {
   }
 
   // Fallback: if no students found by section name, fetch ALL students for this year level
-  if (empty($students) && $stmt = $conn->prepare("SELECT id, student_id, full_name, section FROM students WHERE year_level = ? ORDER BY full_name")) {
+  if (empty($students) && $stmt = $conn->prepare("SELECT id, student_id, full_name, section FROM students WHERE year_level = ? AND deleted_at IS NULL ORDER BY full_name")) {
     $stmt->bind_param('s', $year_level);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -306,7 +306,6 @@ if ($year && $section) {
               </tr>
             <?php endif; ?>
           </tbody>
-        </table>
         </table>
       </div>
 
@@ -592,11 +591,11 @@ if ($year && $section) {
     }
   // tracker smoothing state - keyed by recognized student id/label for stability
   let trackerLastBoxes = {}; // key: trackKey, value: {x,y,w,h,alpha,lastSeen,labelText,isUnknown,lookupId}
-  const TRACKER_SMOOTHING = 0.45; // 0..1, higher = faster tracking
+  const TRACKER_SMOOTHING = 0.25; // lower = smoother box movement (less jitter)
   const TRACKER_MIN_ALPHA = 0.4;
-  const TRACKER_HOLD_MS = 180; // keep last box briefly when detection drops
+  const TRACKER_HOLD_MS = 800; // hold box longer so it doesn't flicker on brief misses
   const LEFT_GRACE_PERIOD_MS = 5000; // 5 seconds grace before marking as Left
-  const MIN_CONFIDENCE_THRESHOLD = 0.25; // minimum confidence to track a face (more permissive)
+  const MIN_CONFIDENCE_THRESHOLD = 0.35; // raised to reduce false face detections
   // global matcher and labeled count so we can refresh descriptors without reload
   let globalFaceMatcher = null;
   let globalLabeledCount = 0;
@@ -605,7 +604,7 @@ if ($year && $section) {
   let detectionWidth = 640;
   let activeDetector = 'ssd';
   const confirmCounts = {};
-  const CONFIRM_FRAMES = 1; // immediate confirmation
+  const CONFIRM_FRAMES = 3; // require 3 consecutive matches before logging a student
 
     function simulateFaceTracking() {
       trackingInterval = setInterval(() => {
@@ -968,7 +967,11 @@ if ($year && $section) {
       }
     }
 
-    reloadBtn.addEventListener('click', () => startHls());
+    reloadBtn.addEventListener('click', () => {
+      try { if (hls) { hls.destroy(); hls = null; } } catch(e) {}
+      hlsStarted = false;
+      startHls();
+    });
 
     // Tunnel (Cloudflare/ngrok) panel toggle & save logic
     const tunnelToggleBtn = document.getElementById('tunnel-toggle-btn');
@@ -1100,8 +1103,8 @@ if ($year && $section) {
 
     async function loadModels() {
       await faceapi.nets.tinyFaceDetector.loadFromUri('../models');
-      detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 608, scoreThreshold: 0.15 });
-      descriptorDetectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 608, scoreThreshold: 0.15 });
+      detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 608, scoreThreshold: 0.35 });
+      descriptorDetectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 608, scoreThreshold: 0.35 });
       detectionWidth = 704;
       activeDetector = 'tiny';
 
@@ -1190,7 +1193,7 @@ if ($year && $section) {
         const labeled = await loadLabeledDescriptors();
         globalLabeledCount = labeled.length;
         if (labeled.length > 0) {
-          globalFaceMatcher = new faceapi.FaceMatcher(labeled, 0.5);
+          globalFaceMatcher = new faceapi.FaceMatcher(labeled, 0.45);
           console.log('Global descriptors loaded:', globalLabeledCount);
           const diagEl = document.getElementById('diag');
           if (diagEl) diagEl.textContent = `Matcher: Loaded ${globalLabeledCount} descriptors`;
@@ -1229,10 +1232,8 @@ if ($year && $section) {
   const faceCropCtx = null;
   // cache student info fetched from server by student_id (label)
   const studentInfoCache = {};
-  const scheduleStart = parseScheduleTimeToday(SCHEDULE_TIME_IN);
-  const scheduleEnd = parseScheduleTimeToday(SCHEDULE_TIME_OUT);
-  const lateCutoff = scheduleStart ? new Date(scheduleStart.getTime() + (25 * 60 * 1000)) : null;
   // hasScheduleWindow already declared at top level - use that instead
+  const scheduleEnd = parseScheduleTimeToday(SCHEDULE_TIME_OUT);
   // Always load persisted data regardless of schedule status
   if (hasScheduleWindow) {
     applyPersistedClassLog();
@@ -1329,7 +1330,7 @@ if ($year && $section) {
 
       let detectBusy = false;
       let subjectResetDone = false;
-      let detectFrameCount = 0; // throttle descriptor extraction
+      let detectFrameCount = 4; // start at 4 so the very first loop triggers a full pipeline
       const DESCRIPTOR_EVERY_N_FRAMES = 5; // run full pipeline every 5 frames
       async function detectLoop() {
         // Always render tracked boxes, even outside schedule
@@ -1352,14 +1353,16 @@ if ($year && $section) {
               const studentDbId = parseInt(row.getAttribute('data-student-db-id'), 10);
               const lookupId = String(studentDbId);
               const timeOutEl = row.querySelector('.time-out');
-              // Only set time-out if student has time-in and time-out is still empty
               if (firstSeenMap[lookupId] && timeOutEl && timeOutEl.textContent === '-') {
-                const timeOutText = activeSch.time_out_fmt; // Use the exact scheduled end time string
+                // Student was detected — set their time-out to scheduled end
+                const timeOutText = activeSch.time_out_fmt;
                 timeOutEl.textContent = timeOutText;
-                // Persist the auto time-out
                 const status = statusMap[lookupId] || 'Present';
                 saveAttendanceUpdate(studentDbId, { status, timeOutTs: scheduleEnd.getTime() });
                 persistAttendanceForStudent(studentDbId, { time_out: timeOutText, remarks: 'Left' });
+              } else if (!firstSeenMap[lookupId] && !Number.isNaN(studentDbId)) {
+                // Student was never detected — auto-save as Absent to the server
+                saveAttendanceUpdate(studentDbId, { status: 'Absent' });
               }
             });
           }
@@ -1430,7 +1433,7 @@ if ($year && $section) {
 
               if (globalFaceMatcher && d.descriptor) {
                 const match = globalFaceMatcher.findBestMatch(d.descriptor);
-                if (match && match.label !== 'unknown' && match.distance < 0.5) {
+                if (match && match.label !== 'unknown' && match.distance < 0.45) {
                   const mLabel = match.label;
                   confirmCounts[mLabel] = (confirmCounts[mLabel] || 0) + 1;
                   if (confirmCounts[mLabel] >= CONFIRM_FRAMES) {
@@ -1512,7 +1515,7 @@ if ($year && $section) {
             if (val > bestIoU) { bestIoU = val; trackKey = key; }
           }
 
-          if (bestIoU < 0.2) {
+          if (bestIoU < 0.3) {
             // New tracker
             trackKey = d.isUnknown ? `u_${now}_${i}` : `r_${d.studentDbId || d.label}`;
             trackerLastBoxes[trackKey] = { x: d.box.x, y: d.box.y, w: d.box.width, h: d.box.height, alpha: 0, lastSeen: now };
@@ -1629,7 +1632,10 @@ if ($year && $section) {
 
 
     // Start recognition after HLS manifest leads to video playback
+    let recognitionStarted = false;
     document.getElementById('liveVideo').addEventListener('play', () => {
+      if (recognitionStarted) return;
+      recognitionStarted = true;
       // give models a small moment
       setTimeout(() => startRecognition().catch(e => console.error(e)), 500);
     });
@@ -1655,7 +1661,7 @@ if ($year && $section) {
 
         toSubmit.push({
           student_db_id: dbId,
-          status: status === 'Present' ? 'Present' : 'Absent',
+          status: (status === 'Present' || status === 'Late') ? status : 'Absent',
           section: SECTION_NAME,
           time_in: timeIn,
           time_out: timeOut

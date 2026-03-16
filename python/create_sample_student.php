@@ -16,7 +16,7 @@ $guardian_email = '';
 $photo1 = '';
 
 // check if exists by student_id
-$stmt = $conn->prepare('SELECT id FROM students WHERE student_id = ? LIMIT 1');
+$stmt = $conn->prepare('SELECT id FROM students WHERE student_id = ? AND deleted_at IS NULL LIMIT 1');
 $stmt->bind_param('s', $student_id);
 $stmt->execute();
 $res = $stmt->get_result();

@@ -1,6 +1,6 @@
+<?php
 error_reporting(0);
 header('Content-Type: application/json');
-
 // Accepts JSON body: { student_db_id: "123", student_id: "S123", student_name: "John Doe", images: ["data:image/jpeg;base64,...", ...] }
 $body = @file_get_contents('php://input');
 if (!$body) {
@@ -43,8 +43,8 @@ if (!is_dir($dir)) {
 }
 
 if (!is_writable($dir)) {
-    echo json_encode(['success'=>false,'message'=>'Directory is not writable (Render). Registration skipped.']);
-    exit;
+  echo json_encode(['success'=>false,'message'=>'Directory is not writable (Render). Registration skipped.']);
+  exit;
 }
 $saved = [];
 $idx = 0;
@@ -82,7 +82,7 @@ try {
     // student_db_id is expected to be the primary key `id`
     $sidNum = (int)$student_db_id;
     if ($sidNum > 0) {
-      if ($stmt = $conn->prepare("UPDATE students SET photo1 = ? WHERE id = ? LIMIT 1")) {
+      if ($stmt = $conn->prepare("UPDATE students SET photo1 = ? WHERE id = ? AND deleted_at IS NULL LIMIT 1")) {
         $stmt->bind_param('si', $firstPath, $sidNum);
         $stmt->execute();
         $stmt->close();

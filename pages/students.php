@@ -105,7 +105,7 @@ $isAdmin = ($userRole === 'admin');
 
     <?php
     // Build a grouped view: year_level -> sections
-    $yearsRes = $conn->query("SELECT year_level FROM students GROUP BY year_level ORDER BY year_level");
+    $yearsRes = $conn->query("SELECT year_level FROM students WHERE deleted_at IS NULL GROUP BY year_level ORDER BY year_level");
     if ($yearsRes && $yearsRes->num_rows > 0) {
       while ($yr = $yearsRes->fetch_assoc()) {
         $year = htmlspecialchars($yr['year_level']);
@@ -117,7 +117,7 @@ $isAdmin = ($userRole === 'admin');
   echo "</div>";
 
         // sections for this year
-        $secRes = $conn->query("SELECT section, COUNT(*) as cnt FROM students WHERE year_level = '" . $conn->real_escape_string($year) . "' GROUP BY section ORDER BY section");
+        $secRes = $conn->query("SELECT section, COUNT(*) as cnt FROM students WHERE year_level = '" . $conn->real_escape_string($year) . "' AND deleted_at IS NULL GROUP BY section ORDER BY section");
         echo "<table class='sections-table'>";
         echo "<thead><tr>";
         echo "<th style='text-align:left;padding:8px;border-bottom:1px solid #eee'>Section</th>";

@@ -15,7 +15,7 @@ $student_id_norm = strtoupper($student_id_raw);
 $student_id = $conn->real_escape_string($student_id_norm);
 
 $row = null;
-if ($stmt = $conn->prepare("SELECT id, student_id, full_name, photo1 FROM students WHERE UPPER(TRIM(student_id)) = ? LIMIT 1")) {
+if ($stmt = $conn->prepare("SELECT id, student_id, full_name, photo1 FROM students WHERE UPPER(TRIM(student_id)) = ? AND deleted_at IS NULL LIMIT 1")) {
   $stmt->bind_param('s', $student_id);
   $stmt->execute();
   $res = $stmt->get_result();
@@ -28,7 +28,7 @@ if ($stmt = $conn->prepare("SELECT id, student_id, full_name, photo1 FROM studen
 // if not found and the token looks like S{dbId} or plain numeric, match by primary key id
 if (!$row && preg_match('/^S?(\d+)$/i', $student_id_raw, $m)) {
   $idInt = (int)$m[1];
-  if ($idInt > 0 && ($stmt = $conn->prepare("SELECT id, student_id, full_name, photo1 FROM students WHERE id = ? LIMIT 1"))) {
+  if ($idInt > 0 && ($stmt = $conn->prepare("SELECT id, student_id, full_name, photo1 FROM students WHERE id = ? AND deleted_at IS NULL LIMIT 1"))) {
     $stmt->bind_param('i', $idInt);
     $stmt->execute();
     $res = $stmt->get_result();

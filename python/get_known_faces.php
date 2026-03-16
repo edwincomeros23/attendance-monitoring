@@ -30,7 +30,7 @@ if ($year && $section) {
     }
     
     // Query enrolled students
-    if ($stmt = $conn->prepare("SELECT id, student_id FROM students WHERE year_level = ? AND section = ?")) {
+    if ($stmt = $conn->prepare("SELECT id, student_id FROM students WHERE year_level = ? AND section = ? AND deleted_at IS NULL")) {
         $stmt->bind_param('ss', $year_level, $section_name);
         $stmt->execute();
         $res = $stmt->get_result();

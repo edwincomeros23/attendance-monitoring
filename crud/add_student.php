@@ -34,12 +34,31 @@ if (!$stmt) {
 $stmt->bind_param('sssssssss', $full_name, $year_level, $section, $guardian, $phone_no, $guardian_email, $birthdate, $gender, $student_id);
 $ok = $stmt->execute();
 if (!$ok) {
+echo json_encode(['success' => true, 'id' => $newId]);
+
     echo json_encode(['success' => false, 'message' => $stmt->error]);
     $stmt->close();
     exit;
 }
 $newId = $stmt->insert_id;
 $stmt->close();
+
+// --- Create known_faces folder for the student ---
+$idSource = $student_id !== '' ? $student_id : $newId;
+$safeId = preg_replace('/[^a-zA-Z0-9_\-]/', '', $idSource);
+$safeName = preg_replace('/[^a-zA-Z0-9\s\-]/', '', $full_name);
+$safeName = preg_replace('/\s+/', '_', trim($safeName));
+$folderName = $safeId;
+if ($folderName !== '' && stripos($folderName, 'S') !== 0) {
+    $folderName = 'S' . $folderName;
+}
+if ($safeName) {
+    $folderName = $folderName . '_' . $safeName;
+}
+$dir = __DIR__ . '/../known_faces/' . $folderName;
+if (!is_dir($dir)) {
+    @mkdir($dir, 0755, true);
+}
 
 echo json_encode(['success' => true, 'id' => $newId]);
 exit;

@@ -63,7 +63,7 @@ function sendAttendanceEmailNotification($studentId, $studentName, $studentIdNum
         return false;
     }
 
-    $stmt = $conn->prepare("SELECT guardian_email FROM students WHERE id = ?");
+    $stmt = $conn->prepare("SELECT guardian_email FROM students WHERE id = ? AND deleted_at IS NULL");
     $stmt->bind_param("i", $studentId);
     $stmt->execute();
     $result = $stmt->get_result();

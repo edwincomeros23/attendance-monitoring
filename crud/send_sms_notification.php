@@ -23,7 +23,7 @@ if (!$studentId || !in_array($eventType, ['time_in', 'time_out'])) {
 }
 
 // Get student details
-$stmt = $conn->prepare("SELECT full_name, student_id FROM students WHERE id = ?");
+$stmt = $conn->prepare("SELECT full_name, student_id FROM students WHERE id = ? AND deleted_at IS NULL");
 $stmt->bind_param("i", $studentId);
 $stmt->execute();
 $result = $stmt->get_result();

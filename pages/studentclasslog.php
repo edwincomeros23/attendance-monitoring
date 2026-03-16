@@ -108,7 +108,7 @@ if ($subject !== '' && !empty($gradeLevels)) {
 $students = [];
 if ($section !== '' && !empty($gradeLevels)) {
   $placeholders = implode(',', array_fill(0, count($gradeLevels), '?'));
-  $sql = "SELECT id, student_id, full_name FROM students WHERE year_level IN ($placeholders) AND section = ? ORDER BY full_name ASC";
+  $sql = "SELECT id, student_id, full_name FROM students WHERE year_level IN ($placeholders) AND section = ? AND deleted_at IS NULL ORDER BY full_name ASC";
   $stmt = $conn->prepare($sql);
   if ($stmt) {
     $types = str_repeat('s', count($gradeLevels)) . 's';

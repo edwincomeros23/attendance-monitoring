@@ -34,10 +34,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     } else {
         // UPDATE
         if ($photo1) {
-            $stmt = $conn->prepare("UPDATE students SET student_id=?, full_name=?, birthdate=?, gender=?, year_level=?, section=?, guardian=?, phone_no=?, guardian_email=?, photo1=? WHERE id=?");
+            $stmt = $conn->prepare("UPDATE students SET student_id=?, full_name=?, birthdate=?, gender=?, year_level=?, section=?, guardian=?, phone_no=?, guardian_email=?, photo1=? WHERE id=? AND deleted_at IS NULL");
             $stmt->bind_param("ssssssssssi", $student_id, $full_name, $birthdate, $gender, $year_level, $section, $guardian, $phone_no, $guardian_email, $photo1, $id);
         } else {
-            $stmt = $conn->prepare("UPDATE students SET student_id=?, full_name=?, birthdate=?, gender=?, year_level=?, section=?, guardian=?, phone_no=?, guardian_email=? WHERE id=?");
+            $stmt = $conn->prepare("UPDATE students SET student_id=?, full_name=?, birthdate=?, gender=?, year_level=?, section=?, guardian=?, phone_no=?, guardian_email=? WHERE id=? AND deleted_at IS NULL");
             $stmt->bind_param("sssssssssi", $student_id, $full_name, $birthdate, $gender, $year_level, $section, $guardian, $phone_no, $guardian_email, $id);
         }
         $stmt->execute();

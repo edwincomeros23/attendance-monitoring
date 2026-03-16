@@ -36,7 +36,7 @@ if (isset($_GET['print_attendance_json'])) {
   }
 
   $student = null;
-  $stmt = $conn->prepare('SELECT id, student_id, full_name, year_level, section FROM students WHERE id = ?');
+  $stmt = $conn->prepare('SELECT id, student_id, full_name, year_level, section FROM students WHERE id = ? AND deleted_at IS NULL');
   if ($stmt) {
     $stmt->bind_param('i', $studentDbId);
     $stmt->execute();
@@ -141,7 +141,7 @@ if (isset($_GET['print_attendance'])) {
   }
 
   $student = null;
-  $stmt = $conn->prepare('SELECT id, student_id, full_name, year_level, section FROM students WHERE id = ?');
+  $stmt = $conn->prepare('SELECT id, student_id, full_name, year_level, section FROM students WHERE id = ? AND deleted_at IS NULL');
   if ($stmt) {
     $stmt->bind_param('i', $studentDbId);
     $stmt->execute();
@@ -474,7 +474,7 @@ if (isset($_GET['print_attendance'])) {
         <tbody>
         <?php
           // load students from DB so edits persist across reloads
-          $stmt = $conn->prepare("SELECT id, student_id, full_name, year_level, section, guardian, phone_no, guardian_email, birthdate, gender, photo1 FROM students WHERE section = ? ORDER BY full_name ASC");
+          $stmt = $conn->prepare("SELECT id, student_id, full_name, year_level, section, guardian, phone_no, guardian_email, birthdate, gender, photo1 FROM students WHERE section = ? AND deleted_at IS NULL ORDER BY full_name ASC");
           if ($stmt) {
             $stmt->bind_param('s', $section);
             $stmt->execute();
@@ -511,6 +511,44 @@ if (isset($_GET['print_attendance'])) {
       </table>
       <!-- Add Student button inside the card (bottom-right) -->
       <button class="add-student-btn" id="addStudentBtn"> Add Student</button>
+
+      <!-- Deleted Students Section -->
+      <?php
+        $deletedStudents = [];
+        $delStmt = $conn->prepare("SELECT id, student_id, full_name, year_level, section, deleted_at FROM students WHERE section = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC");
+        if ($delStmt) {
+          $delStmt->bind_param('s', $section);
+          $delStmt->execute();
+          $delRes = $delStmt->get_result();
+          while ($drow = $delRes->fetch_assoc()) $deletedStudents[] = $drow;
+          $delStmt->close();
+        }
+      ?>
+      <?php if (!empty($deletedStudents)): ?>
+      <div style="margin-top:22px;border-top:2px dashed #e0e0e0;padding-top:14px">
+        <div style="font-weight:700;color:#b30000;margin-bottom:8px;font-size:14px"><i class="fas fa-trash-restore" style="margin-right:6px"></i>Deleted Students (<?php echo count($deletedStudents); ?>)</div>
+        <table>
+          <thead>
+            <tr>
+              <th class="col-name">Name</th>
+              <th class="col-id">Student ID</th>
+              <th style="width:140px">Deleted On</th>
+              <th style="width:100px;text-align:right">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php foreach ($deletedStudents as $ds): ?>
+            <tr data-deleted-id="<?php echo (int)$ds['id']; ?>">
+              <td class="td-name" style="color:#999"><?php echo htmlspecialchars($ds['full_name'] ?: ''); ?></td>
+              <td class="td-id" style="color:#999"><?php echo htmlspecialchars($ds['student_id'] ?: ''); ?></td>
+              <td style="color:#999;font-size:12px"><?php echo date('M j, Y', strtotime($ds['deleted_at'])); ?></td>
+              <td style="text-align:right"><button class="action-btn restore-btn" style="background:#28a745;color:#fff">Restore</button></td>
+            </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+      <?php endif; ?>
       <!-- Add Student Modal (new) - updated to match view modal aesthetic -->
       <div id="addStudentModal" class="sl-modal" aria-hidden="true">
         <div class="sl-modal-content">
@@ -557,7 +595,7 @@ if (isset($_GET['print_attendance'])) {
                       <?php
                         $sections = [];
                         if ($conn) {
-                          $rs = $conn->query("SELECT DISTINCT section FROM students WHERE section <> '' ORDER BY section ASC");
+                          $rs = $conn->query("SELECT DISTINCT section FROM students WHERE section <> '' AND deleted_at IS NULL ORDER BY section ASC");
                           if ($rs) { while ($r = $rs->fetch_assoc()) { if (!empty($r['section'])) $sections[] = $r['section']; } }
                         }
                         $defaultSection = $section;
@@ -994,7 +1032,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
     btn.addEventListener('click', async (e)=>{
       const row = e.target.closest('tr');
       if (!row) return;
-      if (!confirm('Delete this student and associated data? This action cannot be undone.')) return;
+      if (!confirm('Move this student to the deleted list? They can be restored later.')) return;
       const studentDbId = row.getAttribute('data-student-db-id') || row.dataset.studentDbId || '';
       if (!studentDbId) { alert('Missing student id'); return; }
       const delBtn = e.currentTarget;
@@ -1013,6 +1051,33 @@ document.addEventListener('DOMContentLoaded', ()=>{
         console.error('Delete error', err);
         alert('Delete failed due to network error');
         delBtn.disabled = false; delBtn.textContent = 'Delete';
+      }
+    });
+  });
+
+  // restore behavior
+  document.querySelectorAll('.restore-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const row = e.target.closest('tr');
+      if (!row) return;
+      const studentDbId = row.getAttribute('data-deleted-id') || '';
+      if (!studentDbId) { alert('Missing student id'); return; }
+      const restoreBtn = e.currentTarget;
+      restoreBtn.disabled = true; restoreBtn.textContent = 'Restoring...';
+      try {
+        const payload = new URLSearchParams(); payload.append('student_db_id', String(studentDbId));
+        const res = await fetch('../crud/restore_student.php', { method: 'POST', body: payload });
+        const json = await res.json();
+        if (json && json.success) {
+          location.reload();
+        } else {
+          alert('Restore failed: ' + (json && json.message ? json.message : res.statusText));
+          restoreBtn.disabled = false; restoreBtn.textContent = 'Restore';
+        }
+      } catch (err) {
+        console.error('Restore error', err);
+        alert('Restore failed due to network error');
+        restoreBtn.disabled = false; restoreBtn.textContent = 'Restore';
       }
     });
   });
@@ -1234,7 +1299,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
         openModal({ name, studentId, year: year2, section: section2, guardian: guardian2, phone: phone2, avatar: avatar2, birthdate: birthdate2, gender: gender2 });
       });
       tr.querySelector('.delete-btn').addEventListener('click', async (e)=>{
-        if (!confirm('Delete this student and associated data? This action cannot be undone.')) return;
+        if (!confirm('Move this student to the deleted list? They can be restored later.')) return;
         const studentDbId = tr.getAttribute('data-student-db-id') || tr.dataset.studentDbId || '';
         if (!studentDbId) { alert('Missing student id'); return; }
         const btn = e.currentTarget;

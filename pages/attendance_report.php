@@ -73,7 +73,7 @@ $sql = "SELECT a.student_id, a.date, a.status, a.time_in, a.time_out, a.section,
                s.id, s.full_name, s.year_level, s.section AS student_section, 
                COALESCE(r.detect_count, 0) AS detect_count
   FROM attendance a
-  LEFT JOIN students s ON a.student_id = s.id
+  LEFT JOIN students s ON a.student_id = s.id AND s.deleted_at IS NULL
   LEFT JOIN (
     SELECT actual_id AS student_id, log_date, COUNT(*) AS detect_count
     FROM recognition_logs
@@ -130,6 +130,92 @@ if ($stmt) {
   }
   $stmt->close();
 }
+
+// Supplement: add Absent rows for students with no attendance record on active dates
+// Build the list of dates to check: for 'day' use filterDate; for week/month use dates that had attendance
+$suppDates = [];
+if ($filterType === 'day') {
+  $suppDates[] = $filterDate;
+} else {
+  // collect distinct dates that already have at least one attendance record
+  foreach ($attendanceRecords as $rec) {
+    $d = $rec['date'] ?? '';
+    if ($d !== '' && !in_array($d, $suppDates)) $suppDates[] = $d;
+  }
+}
+
+if (!empty($suppDates)) {
+  // fetch matching students once
+  $suppSql    = "SELECT id AS student_id, full_name, year_level, section FROM students WHERE deleted_at IS NULL";
+  $suppTypes  = '';
+  $suppParams = [];
+
+  if (!empty($gradeLevels)) {
+    $placeholders = implode(',', array_fill(0, count($gradeLevels), '?'));
+    $suppSql   .= " AND year_level IN ($placeholders)";
+    $suppTypes .= str_repeat('s', count($gradeLevels));
+    $suppParams = array_merge($suppParams, $gradeLevels);
+  }
+
+  if ($filterSection !== '') {
+    $suppSql   .= " AND section = ?";
+    $suppTypes .= 's';
+    $suppParams[] = $filterSection;
+  }
+
+  $suppSql .= " ORDER BY full_name ASC";
+
+  $suppStmt = $conn->prepare($suppSql);
+  if ($suppStmt) {
+    if ($suppTypes !== '') {
+      $suppStmt->bind_param($suppTypes, ...$suppParams);
+    }
+    $suppStmt->execute();
+    $suppResult = $suppStmt->get_result();
+    $allStudents = [];
+    while ($srow = $suppResult->fetch_assoc()) $allStudents[] = $srow;
+    $suppStmt->close();
+
+    // build a lookup of existing student_id+date pairs for fast checking
+    $existingPairs = [];
+    foreach ($attendanceRecords as $rec) {
+      $existingPairs[($rec['student_id'] ?? '') . '|' . ($rec['date'] ?? '')] = true;
+    }
+
+    // for each active date, add Absent rows for students with no record
+    foreach ($suppDates as $checkDate) {
+      foreach ($allStudents as $srow) {
+        $pairKey = $srow['student_id'] . '|' . $checkDate;
+        if (!isset($existingPairs[$pairKey])) {
+          if ($filterStatus === '' || $filterStatus === 'Absent') {
+            $attendanceRecords[] = [
+              'student_id'     => $srow['student_id'],
+              'date'           => $checkDate,
+              'status'         => 'Absent',
+              'time_in'        => null,
+              'time_out'       => null,
+              'section'        => $srow['section'] ?? '',
+              'id'             => $srow['student_id'],
+              'full_name'      => $srow['full_name'],
+              'year_level'     => $srow['year_level'],
+              'student_section'=> $srow['section'],
+              'detect_count'   => 0
+            ];
+            $summaryStats['Absent']++;
+            $existingPairs[$pairKey] = true; // prevent duplicates
+          }
+        }
+      }
+    }
+  }
+}
+
+// Re-sort records: date DESC then name ASC
+usort($attendanceRecords, function($a, $b) {
+  $dc = strcmp($b['date'] ?? '', $a['date'] ?? '');
+  if ($dc !== 0) return $dc;
+  return strcmp($a['full_name'] ?? '', $b['full_name'] ?? '');
+});
 
 function grade_variants($grade) {
   $variants = [];
@@ -212,7 +298,7 @@ if (!empty($gradeSet)) {
 // Fetch grade levels and sections for dropdowns
 $gradeOptions = [];
 $sectionOptions = [];
-$gradeRes = $conn->query("SELECT DISTINCT year_level FROM students ORDER BY year_level ASC");
+$gradeRes = $conn->query("SELECT DISTINCT year_level FROM students WHERE deleted_at IS NULL ORDER BY year_level ASC");
 if ($gradeRes) {
   while ($r = $gradeRes->fetch_assoc()) {
     $gradeOptions[] = $r['year_level'];
@@ -221,7 +307,7 @@ if ($gradeRes) {
 
 if ($filterYear !== '' && !empty($gradeLevels)) {
   $placeholders = implode(',', array_fill(0, count($gradeLevels), '?'));
-  $sectSql = "SELECT DISTINCT section FROM students WHERE year_level IN ($placeholders) ORDER BY section ASC";
+  $sectSql = "SELECT DISTINCT section FROM students WHERE year_level IN ($placeholders) AND deleted_at IS NULL ORDER BY section ASC";
   $stmt = $conn->prepare($sectSql);
   if ($stmt) {
     $stmt->bind_param(str_repeat('s', count($gradeLevels)), ...$gradeLevels);
@@ -434,8 +520,15 @@ if ($filterYear !== '' && !empty($gradeLevels)) {
                     $dayName = date('l', strtotime($record['date']));
                     $subjectTotal = get_subject_count_for_day($record['year_level'] ?? '', $record['section'] ?? '', $dayName, $subjectCounts);
                     $detectCount = (int)($record['detect_count'] ?? 0);
+                    $pct = $subjectTotal > 0 ? round(($detectCount / $subjectTotal) * 100) : 0;
+                    $pctColor = $pct >= 80 ? '#155724' : ($pct >= 50 ? '#856404' : '#721c24');
                   ?>
-                  <td><?php echo $detectCount . '/' . $subjectTotal; ?></td>
+                  <td>
+                    <?php echo $detectCount . '/' . $subjectTotal; ?>
+                    <?php if ($subjectTotal > 0): ?>
+                      <span style="color:<?php echo $pctColor; ?>;font-weight:700;margin-left:4px">(<?php echo $pct; ?>%)</span>
+                    <?php endif; ?>
+                  </td>
                 </tr>
               <?php endforeach; ?>
             </tbody>
@@ -443,6 +536,120 @@ if ($filterYear !== '' && !empty($gradeLevels)) {
         </div>
       <?php endif; ?>
     </div>
+
+    <!-- Face Recognition Accuracy Table -->
+    <?php
+      // Query recognition_logs for actual face recognition accuracy per student
+      // total_attempts = all times the system tried to identify this student (actual_id = student)
+      // correct = is_correct = 1, incorrect = is_correct = 0
+      $recAccSql = "SELECT r.actual_id, s.full_name, s.year_level, s.section,
+                           COUNT(*) AS total_attempts,
+                           SUM(r.is_correct = 1) AS correct,
+                           SUM(r.is_correct = 0) AS incorrect
+                    FROM recognition_logs r
+                    INNER JOIN students s ON r.actual_id = s.id AND s.deleted_at IS NULL
+                    WHERE r.log_date >= ? AND r.log_date <= ?";
+      $recAccTypes = 'ss';
+      $recAccParams = [$startDate, $endDate];
+
+      if (!empty($gradeLevels)) {
+        $placeholders = implode(',', array_fill(0, count($gradeLevels), '?'));
+        $recAccSql .= " AND s.year_level IN ($placeholders)";
+        $recAccTypes .= str_repeat('s', count($gradeLevels));
+        $recAccParams = array_merge($recAccParams, $gradeLevels);
+      }
+      if ($filterSection !== '') {
+        $recAccSql .= " AND r.section = ?";
+        $recAccTypes .= 's';
+        $recAccParams[] = $filterSection;
+      }
+
+      $recAccSql .= " GROUP BY r.actual_id, s.full_name, s.year_level, s.section
+                      ORDER BY s.full_name ASC";
+
+      $recAccRows = [];
+      $recAccStmt = $conn->prepare($recAccSql);
+      if ($recAccStmt) {
+        $recAccStmt->bind_param($recAccTypes, ...$recAccParams);
+        $recAccStmt->execute();
+        $recAccResult = $recAccStmt->get_result();
+        while ($raRow = $recAccResult->fetch_assoc()) $recAccRows[] = $raRow;
+        $recAccStmt->close();
+      }
+
+      // Also get students in the report who have zero recognition attempts
+      $recAccIds = array_column($recAccRows, 'actual_id');
+      $studentsSeen = [];
+      foreach ($attendanceRecords as $rec) {
+        $sid = $rec['student_id'] ?? '';
+        if ($sid !== '' && !in_array($sid, $recAccIds) && !isset($studentsSeen[$sid])) {
+          $studentsSeen[$sid] = true;
+          $recAccRows[] = [
+            'actual_id'      => $sid,
+            'full_name'      => $rec['full_name'] ?? 'Unknown',
+            'year_level'     => $rec['year_level'] ?? '',
+            'section'        => $rec['section'] ?? '',
+            'total_attempts' => 0,
+            'correct'        => 0,
+            'incorrect'      => 0,
+          ];
+        }
+      }
+
+      // Sort: highest accuracy first, then by name
+      usort($recAccRows, function($a, $b) {
+        $pctA = $a['total_attempts'] > 0 ? ($a['correct'] / $a['total_attempts']) : -1;
+        $pctB = $b['total_attempts'] > 0 ? ($b['correct'] / $b['total_attempts']) : -1;
+        if ($pctB !== $pctA) return $pctB <=> $pctA;
+        return strcmp($a['full_name'], $b['full_name']);
+      });
+    ?>
+    <?php if (!empty($recAccRows)): ?>
+    <div class="records-container" style="margin-top:14px">
+      <h3 class="records-title" style="margin-bottom:12px"><i class="fas fa-chart-bar" style="margin-right:6px"></i>Face Recognition Accuracy</h3>
+      <div style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Grade</th>
+              <th>Section</th>
+              <th style="text-align:center">Accuracy</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php foreach ($recAccRows as $ra):
+              $totalAtt = (int)($ra['total_attempts'] ?? 0);
+              $correctAtt = (int)($ra['correct'] ?? 0);
+              $accPct = $totalAtt > 0 ? round(($correctAtt / $totalAtt) * 100) : 0;
+              if ($totalAtt === 0) { $barColor = '#9e9e9e'; }
+              elseif ($accPct >= 80) { $barColor = '#28a745'; }
+              elseif ($accPct >= 50) { $barColor = '#ff9800'; }
+              else { $barColor = '#d32f2f'; }
+            ?>
+            <tr>
+              <td><?php echo htmlspecialchars($ra['full_name']); ?></td>
+              <td><?php echo htmlspecialchars($ra['year_level']); ?></td>
+              <td><?php echo htmlspecialchars($ra['section']); ?></td>
+              <td style="text-align:center;width:200px">
+                <?php if ($totalAtt > 0): ?>
+                <div style="display:flex;align-items:center;gap:8px;justify-content:center">
+                  <div style="flex:1;max-width:100px;height:10px;background:#eee;border-radius:5px;overflow:hidden">
+                    <div style="width:<?php echo $accPct; ?>%;height:100%;background:<?php echo $barColor; ?>;border-radius:5px"></div>
+                  </div>
+                  <span style="font-weight:700;color:<?php echo $barColor; ?>;font-size:13px;min-width:40px"><?php echo $accPct; ?>%</span>
+                </div>
+                <?php else: ?>
+                <span style="color:#9e9e9e;font-size:12px">No data</span>
+                <?php endif; ?>
+              </td>
+            </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <?php endif; ?>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
