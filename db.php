@@ -53,4 +53,25 @@ if ($conn->connect_error) {
 
 // Optional: set charset to avoid encoding issues
 $conn->set_charset("utf8");
+
+// Auto-migration: ensure required columns exist in cloud database
+if (getenv('RENDER') === 'true' || !empty(getenv('DB_HOST'))) {
+    // Check and add deleted_at column to students table
+    $col = $conn->query("SHOW COLUMNS FROM students LIKE 'deleted_at'");
+    if ($col && $col->num_rows === 0) {
+        $conn->query("ALTER TABLE students ADD COLUMN deleted_at DATETIME DEFAULT NULL");
+    }
+
+    // Check and add school_year column to students table
+    $col = $conn->query("SHOW COLUMNS FROM students LIKE 'school_year'");
+    if ($col && $col->num_rows === 0) {
+        $conn->query("ALTER TABLE students ADD COLUMN school_year VARCHAR(20) DEFAULT NULL");
+    }
+
+    // Check and add school_year column to attendance table
+    $col = $conn->query("SHOW COLUMNS FROM attendance LIKE 'school_year'");
+    if ($col && $col->num_rows === 0) {
+        $conn->query("ALTER TABLE attendance ADD COLUMN school_year VARCHAR(20) DEFAULT NULL");
+    }
+}
 ?>
